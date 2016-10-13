@@ -9,6 +9,7 @@ MODULE_LICENSE("GPL");
 
 #define LIST_LENGTH 10
 static int data[LIST_LENGTH];
+static int lpos;
 
 #define MAX_CHAR 100
 static char *kbuf;
@@ -24,8 +25,42 @@ typedef struct {
 static struct proc_dir_entry *proc_entry;
 
 static ssize_t modlist_read(struct file *filp, char __user *buf, size_t len, loff_t *off) {
+  int nr_bytes;
+  
   printk(KERN_INFO "Modlist: Reading\n");
-  return 0;
+  if ((*off) > 0) /* Tell the application that there is nothing left to read */
+      return 0;
+
+  nr_bytes = lpos * sizeof(int);
+  char *result = (char *)vmalloc(nr_bytes + lpos + 1); // Dest string length = space for the data, lpos linebreaks and \0
+  if (!result) {
+    printk(KERN_INFO "Modlist: Panic! (failed vmalloc)\n");
+    return 0;
+  }
+  
+  int i = 0;
+  for (; i < lpos; i++) {
+    char elem[6];
+    sprintf(&elem[0], "%d\n", data[i]);
+    strcat(result, &elem[0]);
+    printk(KERN_INFO "Modlist: Reading (partial: %s)", result);
+  }
+
+  printk(KERN_INFO "Modlist: Reading (finished: %s)", result);
+    
+  if (len < nr_bytes)
+    return -ENOSPC;
+  
+  /* Transfer data from the kernel to userspace */  
+  if (copy_to_user(buf, &result[0], nr_bytes))
+    return -EINVAL;
+    
+  (*off) += len;  /* Update the file pointer */
+
+  if (result)
+    vfree(result);
+
+  return nr_bytes; 
 }
 
 static ssize_t modlist_write(struct file *filp, const char __user *buf, size_t len, loff_t *off) {
@@ -43,6 +78,7 @@ static ssize_t modlist_write(struct file *filp, const char __user *buf, size_t l
     printk(KERN_INFO "Modlist: Panic! (failed copy_from_user)\n");
     return -EFAULT;
   }
+
   kbuf[len] = '\0'; // Add string terminator
 
   printk(KERN_INFO "Modlist: Writing %s", kbuf);
@@ -58,6 +94,14 @@ static const struct file_operations proc_entry_fops = {
 int init_modlist_module( void ) {
   int ret = 0;
 
+  // Eliminar esto una vez implementemos write
+  lpos = 0;
+  int i = 0;
+  for(; i < 5; i++) {
+    data[i] = i;
+    lpos++;
+  }
+
   kbuf = (char *)vmalloc( MAX_CHAR );
 
   if (!kbuf) {
@@ -72,7 +116,7 @@ int init_modlist_module( void ) {
       ret = -ENOMEM;
       printk(KERN_INFO "Modlist: Can't create /proc entry\n");
     } else {
-      printk(KERN_INFO "Modlist: Module loaded\n");
+      printk(KERN_INFO "Modlist: Module loaded 1\n");
     }    
   }
 
@@ -80,8 +124,7 @@ int init_modlist_module( void ) {
 }
 
 
-void exit_modlist_module( void )
-{
+void exit_modlist_module( void ) {
   vfree(kbuf);
   remove_proc_entry("modlist", NULL);
   printk(KERN_INFO "Modlist: Module unloaded.\n");
