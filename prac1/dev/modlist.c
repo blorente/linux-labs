@@ -14,6 +14,8 @@ static int lpos;
 #define MAX_CHAR 100
 static char *kbuf;
 
+#define MAX_OPTION_LENGTH 10
+
 struct list_head storage; /* Lista enlazada */
 
 /* Nodos de la lista */
@@ -43,7 +45,6 @@ static ssize_t modlist_read(struct file *filp, char __user *buf, size_t len, lof
     char elem[6];
     sprintf(&elem[0], "%d\n", data[i]);
     strcat(result, &elem[0]);
-    printk(KERN_INFO "Modlist: Reading (partial: %s)", result);
   }
 
   printk(KERN_INFO "Modlist: Reading (finished: %s)", result);
@@ -63,8 +64,17 @@ static ssize_t modlist_read(struct file *filp, char __user *buf, size_t len, lof
   return nr_bytes; 
 }
 
+static int append_to_list(int elem);
+static void remove_from_list(int elem);
+static void clear_list( void );
+
 static ssize_t modlist_write(struct file *filp, const char __user *buf, size_t len, loff_t *off) {
 
+  char option[MAX_OPTION_LENGTH];
+  int elem;
+
+   memset( option, 0, MAX_OPTION_LENGTH );
+  
   if ((*off) > 0)
       return 0;
 
@@ -81,9 +91,51 @@ static ssize_t modlist_write(struct file *filp, const char __user *buf, size_t l
 
   kbuf[len] = '\0'; // Add string terminator
 
-  printk(KERN_INFO "Modlist: Writing %s", kbuf);
+  printk(KERN_INFO "Modlist: Writing (raw: %s)", kbuf);
+
+  sscanf(kbuf, "%s %d", option, &elem);
+
+  printk(KERN_INFO "Modlist: Writing (option: %s, elem: %d)\n", option, elem);
+
+  if (strcmp(option, "add") == 0) {
+    if ( append_to_list(elem) ) 
+      return 0;    
+  } else if (strcmp(option, "remove") == 0) {
+    remove_from_list(elem);
+  } else if (strcmp(option, "cleanup") == 0) {
+    clear_list();
+  } else {
+    printk(KERN_INFO "Modlist: Writing (unrecognized option)\n");
+  }
 
   return len;
+}
+
+int append_to_list(int elem) {
+  if (lpos >= LIST_LENGTH)
+    return 1;
+
+  data[lpos++] = elem;
+  return 0;
+}
+
+void remove_from_list(int elem) {
+  int i;
+  int j;
+
+  for (i = 0; i < lpos; i++) {
+    if (data[i] == elem) {
+      for (j = i; j < lpos; j++) {
+        data[j] = data[j + 1]; 
+      }
+      i--;
+      lpos--;
+    }
+  }
+}
+
+void clear_list() {
+  lpos = 0;
 }
 
 static const struct file_operations proc_entry_fops = {
