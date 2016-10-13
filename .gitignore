@@ -32,7 +32,14 @@
 *.dSYM/
 *.su
 
+# My files
+*.o.*
+*.ko*
+*.mod*
+.*/.tmp_versions
+.modlist.*
+Module.*
+*.order
 
-*.pdf
-*/Ejemplos
-
+.pdf
+Ejemplos
