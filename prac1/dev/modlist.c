@@ -111,10 +111,10 @@ static ssize_t modlist_write(struct file *filp, const char __user *buf, size_t l
       return -ENOMEM;    
   } else if (sscanf(kbuf, "remove %i", &elem) == 1) {
     remove_from_list(elem);
-  } else if (strcmp(kbuf, "cleanup") == 0) {
+  } else if (strcmp(kbuf, "cleanup") >= 0) {
     clear_list();
   } else {
-    printk(KERN_INFO "Modlist: Writing (unrecognized option)\n");
+    printk(KERN_INFO "Modlist: Writing (unrecognized option: %s)", kbuf);
   }
 
   return len;
@@ -128,11 +128,31 @@ int append_to_list(int elem) {
 }
 
 void remove_from_list(int elem) {
-  
+  struct list_item_t *item = NULL;
+  struct list_head *cur_node = NULL;
+  struct list_head *aux_node = NULL;
+
+  list_for_each_safe(cur_node, aux_node, &storage) {    
+    item = list_entry(cur_node, struct list_item_t, storage_links);
+    if (item->data == elem) {
+      printk(KERN_INFO "Modlist: Deleting node (%i)\n", item->data);
+      list_del(cur_node);
+      vfree(item);      
+    }
+  }
 }
 
 void clear_list() {
-  
+  struct list_item_t *item = NULL;
+  struct list_head *cur_node = NULL;
+  struct list_head *aux_node = NULL;
+
+  list_for_each_safe(cur_node, aux_node, &storage) {
+    printk(KERN_INFO "Modlist: Deleting node\n");
+    item = list_entry(cur_node, struct list_item_t, storage_links);
+    list_del(cur_node);
+    vfree(item);
+  }
 }
 
 static const struct file_operations proc_entry_fops = {
@@ -169,6 +189,7 @@ int init_modlist_module( void ) {
 
 void exit_modlist_module( void ) {
   vfree(kbuf);
+  clear_list();
   remove_proc_entry("modlist", NULL);
   printk(KERN_INFO "Modlist: Module unloaded.\n");
 }
