@@ -3,21 +3,16 @@
 #include <linux/proc_fs.h>
 #include <linux/string.h>
 #include <linux/vmalloc.h>
+#include <linux/list.h>
 #include <asm-generic/uaccess.h>
 
 MODULE_LICENSE("GPL");
 
-#define LIST_LENGTH 10
-static int data[LIST_LENGTH];
-static int lpos;
-
 #define MAX_CHAR 100
 static char *kbuf;
 
-#define MAX_OPTION_LENGTH 10
-
 /* Nodos de la lista */
-typedef struct {
+struct list_item_t {
   int data;
   struct list_head storage_links;
 } list_item_t;
@@ -48,7 +43,8 @@ int allocate_kbuf(int num_bytes) {
 static ssize_t modlist_read(struct file *filp, char __user *buf, size_t len, loff_t *off) {
   int nr_bytes;
   char *result;
-  int i;
+  struct list_item_t* item = NULL;
+  struct list_head* cur_node = NULL;
 
   /* Allocate space to compose the result, then write to user space*/
   if ( allocate_kbuf(len) == 0) {
@@ -61,10 +57,14 @@ static ssize_t modlist_read(struct file *filp, char __user *buf, size_t len, lof
   if ((*off) > 0)
       return 0;
 
-  result = kbuf;
-  /* Write the reult in kbuf, using the result pointer */
-  for (i = 0; i < lpos; i++) {    
-    result += sprintf(result, "%i\n", data[i]);
+  /* Use result as a writing head */
+  result = &kbuf[0];
+  
+  list_for_each(cur_node, &storage) {
+    /* item points to the structure wherein the links are embedded */
+    item = list_entry(cur_node, struct list_item_t, storage_links);
+    printk(KERN_INFO "Modlist: Reading (element: %i)", item->data);
+    result += sprintf(result, "%i\n", item->data);
   }
 
   /* Use pointer arithmetic to determine how many bytes were written */
@@ -108,7 +108,7 @@ static ssize_t modlist_write(struct file *filp, const char __user *buf, size_t l
 
   if (sscanf(kbuf, "add %i", &elem) == 1) {
     if ( append_to_list(elem) ) 
-      return 0;    
+      return -ENOMEM;    
   } else if (sscanf(kbuf, "remove %i", &elem) == 1) {
     remove_from_list(elem);
   } else if (strcmp(kbuf, "cleanup") == 0) {
@@ -121,30 +121,18 @@ static ssize_t modlist_write(struct file *filp, const char __user *buf, size_t l
 }
 
 int append_to_list(int elem) {
-  if (lpos >= LIST_LENGTH)
-    return 1;
-
-  data[lpos++] = elem;
+  struct list_item_t *new_item = (struct list_item_t *)vmalloc(sizeof(struct list_item_t));
+  new_item->data = elem;
+  list_add_tail(&new_item->storage_links, &storage);
   return 0;
 }
 
 void remove_from_list(int elem) {
-  int i;
-  int j;
-
-  for (i = 0; i < lpos; i++) {
-    if (data[i] == elem) {
-      for (j = i; j < lpos; j++) {
-        data[j] = data[j + 1]; 
-      }
-      i--;
-      lpos--;
-    }
-  }
+  
 }
 
 void clear_list() {
-  lpos = 0;
+  
 }
 
 static const struct file_operations proc_entry_fops = {
@@ -155,13 +143,7 @@ static const struct file_operations proc_entry_fops = {
 int init_modlist_module( void ) {
   int ret = 0;
 
-  // Eliminar esto una vez implementemos write
-  lpos = 0;
-  int i = 0;
-  for(; i < 5; i++) {
-    data[i] = i;
-    lpos++;
-  }
+  INIT_LIST_HEAD(&storage);  
 
   kbuf = (char *)vmalloc( MAX_CHAR );
 
@@ -190,7 +172,6 @@ void exit_modlist_module( void ) {
   remove_proc_entry("modlist", NULL);
   printk(KERN_INFO "Modlist: Module unloaded.\n");
 }
-
 
 module_init( init_modlist_module );
 module_exit( exit_modlist_module );
