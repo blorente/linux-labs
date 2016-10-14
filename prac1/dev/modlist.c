@@ -16,64 +16,77 @@ static char *kbuf;
 
 #define MAX_OPTION_LENGTH 10
 
-struct list_head storage; /* Lista enlazada */
-
 /* Nodos de la lista */
 typedef struct {
   int data;
   struct list_head storage_links;
 } list_item_t;
 
+struct list_head storage; /* Lista enlazada */
+
 static struct proc_dir_entry *proc_entry;
+
+static int allocate_kbuf(int num_bytes);
+static int append_to_list(int elem);
+static void remove_from_list(int elem);
+static void clear_list( void );
+
+int allocate_kbuf(int num_bytes) {
+  if (kbuf) 
+    vfree(kbuf);
+
+  kbuf = (char *)vmalloc(num_bytes);
+  if (!kbuf) {
+    printk(KERN_INFO "Modlist: Panic! (failed vmalloc)\n");
+    return 0;    
+  }
+
+  memset( kbuf, 0, num_bytes );
+  return num_bytes;
+}
 
 static ssize_t modlist_read(struct file *filp, char __user *buf, size_t len, loff_t *off) {
   int nr_bytes;
+  char *result;
+  int i;
+
+  /* Allocate space to compose the result, then write to user space*/
+  if ( allocate_kbuf(len) == 0) {
+    return -ENOMEM;
+  }
   
   printk(KERN_INFO "Modlist: Reading\n");
-  if ((*off) > 0) /* Tell the application that there is nothing left to read */
+
+  /* Tell the application that there is nothing left to read */
+  if ((*off) > 0)
       return 0;
 
-  nr_bytes = lpos * sizeof(int);
-  char *result = (char *)vmalloc(nr_bytes + lpos + 1); // Dest string length = space for the data, lpos linebreaks and \0
-  if (!result) {
-    printk(KERN_INFO "Modlist: Panic! (failed vmalloc)\n");
-    return 0;
-  }
-  
-  int i = 0;
-  for (; i < lpos; i++) {
-    char elem[6];
-    sprintf(&elem[0], "%d\n", data[i]);
-    strcat(result, &elem[0]);
+  result = kbuf;
+  /* Write the reult in kbuf, using the result pointer */
+  for (i = 0; i < lpos; i++) {    
+    result += sprintf(result, "%i\n", data[i]);
   }
 
-  printk(KERN_INFO "Modlist: Reading (finished: %s)", result);
+  /* Use pointer arithmetic to determine how many bytes were written */
+  nr_bytes = result - kbuf;
+
+  printk(KERN_INFO "Modlist: Reading (finished: %s)", kbuf);
     
   if (len < nr_bytes)
     return -ENOSPC;
   
   /* Transfer data from the kernel to userspace */  
-  if (copy_to_user(buf, &result[0], nr_bytes))
+  if (copy_to_user(buf, &kbuf[0], nr_bytes))
     return -EINVAL;
     
   (*off) += len;  /* Update the file pointer */
 
-  if (result)
-    vfree(result);
-
   return nr_bytes; 
 }
 
-static int append_to_list(int elem);
-static void remove_from_list(int elem);
-static void clear_list( void );
-
 static ssize_t modlist_write(struct file *filp, const char __user *buf, size_t len, loff_t *off) {
 
-  char option[MAX_OPTION_LENGTH];
   int elem;
-
-   memset( option, 0, MAX_OPTION_LENGTH );
   
   if ((*off) > 0)
       return 0;
@@ -93,16 +106,12 @@ static ssize_t modlist_write(struct file *filp, const char __user *buf, size_t l
 
   printk(KERN_INFO "Modlist: Writing (raw: %s)", kbuf);
 
-  sscanf(kbuf, "%s %d", option, &elem);
-
-  printk(KERN_INFO "Modlist: Writing (option: %s, elem: %d)\n", option, elem);
-
-  if (strcmp(option, "add") == 0) {
+  if (sscanf(kbuf, "add %i", &elem) == 1) {
     if ( append_to_list(elem) ) 
       return 0;    
-  } else if (strcmp(option, "remove") == 0) {
+  } else if (sscanf(kbuf, "remove %i", &elem) == 1) {
     remove_from_list(elem);
-  } else if (strcmp(option, "cleanup") == 0) {
+  } else if (strcmp(kbuf, "cleanup") == 0) {
     clear_list();
   } else {
     printk(KERN_INFO "Modlist: Writing (unrecognized option)\n");
