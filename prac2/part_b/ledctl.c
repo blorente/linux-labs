@@ -12,8 +12,6 @@
 #define ALL_LEDS_OFF 0
 
 #define MAX_CHAR 100
-static char *kbuf;
-
 
 static struct proc_dir_entry *proc_entry;
 
@@ -32,27 +30,33 @@ static inline int set_leds(struct tty_driver* handler, unsigned int mask) {
 }
 
 static ssize_t ledctl_write(struct file *filp, const char __user *buf, size_t len, loff_t *off) {
+	char *kbuf;
 	int written_bytes;
 	int led_mask;
 
 	if ((*off) > 0)
     	return 0;
 
-	written_bytes = len < MAX_CHAR ? len : MAX_CHAR;
-	kbuf = (char *)vmalloc(written_bytes);
+	written_bytes = len < MAX_CHAR ? len + 1 : MAX_CHAR;
+	kbuf = (char *)vmalloc(written_bytes + 1);
 	if (!kbuf) {		
 		printk(KERN_INFO "Ledctl: Not enough memory!\n");
 		return -ENOMEM;
 	}
 
-	if (copy_from_user( &kbuf[0], buf, len )) {
+	if (copy_from_user( &kbuf[0], buf, written_bytes )) {
 		printk(KERN_INFO "Ledctl: Panic! (failed copy_from_user)\n");
 		vfree(kbuf);
 		return -EFAULT;
 	}
 
+	kbuf[written_bytes] = '\0';
+
 	if (sscanf(kbuf, "%x", &led_mask) == 1) {
-		printk(KERN_INFO "Ledctl: Writing %x", led_mask);
+		printk(KERN_INFO "Ledctl: Writing %d", led_mask);
+		if (set_leds(kbd_driver, led_mask) != 0) {
+			printk(KERN_INFO "Ledctl: Call to set_leds failed\n");
+		}
 	}
 
 	vfree(kbuf);
@@ -65,13 +69,13 @@ static const struct file_operations proc_entry_fops = {
 
 static int __init ledctl_init(void) {	
 	kbd_driver= get_kbd_driver_handler();
-	set_leds(kbd_driver,ALL_LEDS_ON); 
+	set_leds(kbd_driver, ALL_LEDS_ON); 
 
    // Test /proc entry
 	proc_entry = proc_create( "ledctl", 0666, NULL, &proc_entry_fops );
 	if (proc_entry == NULL) {
-	  ret = -ENOMEM;
 	  printk(KERN_INFO "Ledctl: Can't create /proc entry\n");
+	  return -ENOMEM;
 	} else {
 	  printk(KERN_INFO "Ledctl: Module loaded\n");
 	}  
@@ -86,4 +90,4 @@ module_init(ledctl_init);
 module_exit(ledctl_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Modleds");
+MODULE_DESCRIPTION("Ledctl");
