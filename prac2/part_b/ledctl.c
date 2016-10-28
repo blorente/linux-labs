@@ -5,29 +5,77 @@
 #include <linux/kd.h>       /* For KDSETLED */
 #include <linux/vt_kern.h>
 
+// For mod test, remove later!
+#include <linux/proc_fs.h>
+
 #define ALL_LEDS_ON 0x7
 #define ALL_LEDS_OFF 0
 
+#define MAX_CHAR 100
+static char *kbuf;
+
+
+static struct proc_dir_entry *proc_entry;
 
 struct tty_driver* kbd_driver= NULL;
 
-
 /* Get driver handler */
 struct tty_driver* get_kbd_driver_handler(void) {
-   printk(KERN_INFO "modleds: loading\n");
-   printk(KERN_INFO "modleds: fgconsole is %x\n", fg_console);
-   return vc_cons[fg_console].d->port.tty->driver;
+	printk(KERN_INFO "Ledctl: loading\n");
+	printk(KERN_INFO "Ledctl: fgconsole is %x\n", fg_console);
+	return vc_cons[fg_console].d->port.tty->driver;
 }
 
 /* Set led state to that specified by mask */
 static inline int set_leds(struct tty_driver* handler, unsigned int mask) {
-    return (handler->ops->ioctl) (vc_cons[fg_console].d->port.tty, KDSETLED,mask);
+	return (handler->ops->ioctl) (vc_cons[fg_console].d->port.tty, KDSETLED,mask);
 }
 
+static ssize_t ledctl_write(struct file *filp, const char __user *buf, size_t len, loff_t *off) {
+	int written_bytes;
+	int led_mask;
+
+	if ((*off) > 0)
+    	return 0;
+
+	written_bytes = len < MAX_CHAR ? len : MAX_CHAR;
+	kbuf = (char *)vmalloc(written_bytes);
+	if (!kbuf) {		
+		printk(KERN_INFO "Ledctl: Not enough memory!\n");
+		return -ENOMEM;
+	}
+
+	if (copy_from_user( &kbuf[0], buf, len )) {
+		printk(KERN_INFO "Ledctl: Panic! (failed copy_from_user)\n");
+		vfree(kbuf);
+		return -EFAULT;
+	}
+
+	if (sscanf(kbuf, "%x", &led_mask) == 1) {
+		printk(KERN_INFO "Ledctl: Writing %x", led_mask);
+	}
+
+	vfree(kbuf);
+	return written_bytes;
+}
+
+static const struct file_operations proc_entry_fops = {
+    .write = ledctl_write,
+};
+
 static int __init ledctl_init(void) {	
-   kbd_driver= get_kbd_driver_handler();
-   set_leds(kbd_driver,ALL_LEDS_ON); 
-   return 0;
+	kbd_driver= get_kbd_driver_handler();
+	set_leds(kbd_driver,ALL_LEDS_ON); 
+
+   // Test /proc entry
+	proc_entry = proc_create( "ledctl", 0666, NULL, &proc_entry_fops );
+	if (proc_entry == NULL) {
+	  ret = -ENOMEM;
+	  printk(KERN_INFO "Ledctl: Can't create /proc entry\n");
+	} else {
+	  printk(KERN_INFO "Ledctl: Module loaded\n");
+	}  
+	return 0;
 }
 
 static void __exit ledctl_exit(void) {
