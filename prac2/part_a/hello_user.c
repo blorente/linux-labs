@@ -4,9 +4,9 @@
 #include <stdio.h>
 
 #ifdef __i386__
-#define __NR_hello XXX
+#define __NR_hello 353
 #else
-#define __NR_hello XXX
+#define __NR_hello 316
 #endif
 
 long lin_hello( void ) {
