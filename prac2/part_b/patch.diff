@@ -1,0 +1,105 @@
+diff --git a/arch/x86/syscalls/syscall_32.tbl b/arch/x86/syscalls/syscall_32.tbl
+index 96bc506..ee7d6e1 100644
+--- a/arch/x86/syscalls/syscall_32.tbl
++++ b/arch/x86/syscalls/syscall_32.tbl
+@@ -359,3 +359,4 @@
+ 350	i386	finit_module		sys_finit_module
+ 351	i386	sched_setattr		sys_sched_setattr
+ 352	i386	sched_getattr		sys_sched_getattr
++353	i386	ledctl			sys_ledctl
+diff --git a/arch/x86/syscalls/syscall_64.tbl b/arch/x86/syscalls/syscall_64.tbl
+index a12bddc..59a13bf 100644
+--- a/arch/x86/syscalls/syscall_64.tbl
++++ b/arch/x86/syscalls/syscall_64.tbl
+@@ -322,6 +322,7 @@
+ 313	common	finit_module		sys_finit_module
+ 314	common	sched_setattr		sys_sched_setattr
+ 315	common	sched_getattr		sys_sched_getattr
++316	common	ledctl			sys_ledctl
+ 
+ #
+ # x32-specific system call numbers start at 512 to avoid cache impact
+diff --git a/kernel/Makefile b/kernel/Makefile
+index bc010ee..935992e 100644
+--- a/kernel/Makefile
++++ b/kernel/Makefile
+@@ -10,7 +10,7 @@ obj-y     = fork.o exec_domain.o panic.o \
+ 	    kthread.o sys_ni.o posix-cpu-timers.o \
+ 	    hrtimer.o nsproxy.o \
+ 	    notifier.o ksysfs.o cred.o reboot.o \
+-	    async.o range.o groups.o smpboot.o
++	    async.o range.o groups.o smpboot.o ledctl_syscall.o
+ 
+ ifdef CONFIG_FUNCTION_TRACER
+ # Do not trace debug files and internal ftrace files
+diff --git a/kernel/ledctl_syscall.c b/kernel/ledctl_syscall.c
+new file mode 100644
+index 0000000..49a3114
+--- /dev/null
++++ b/kernel/ledctl_syscall.c
+@@ -0,0 +1,65 @@
++#include <linux/kernel.h> 
++#include <linux/syscalls.h> 
++#include <asm-generic/errno.h>
++#include <linux/init.h>
++#include <linux/tty.h>      /* For fg_console */
++#include <linux/kd.h>       /* For KDSETLED */
++#include <linux/vt_kern.h>
++
++struct tty_driver* kbd_driver= NULL;
++
++/* Get driver handler */
++struct tty_driver* get_kbd_driver_handler(void) {
++	printk(KERN_INFO "Ledctl: loading\n");
++	printk(KERN_INFO "Ledctl: fgconsole is %x\n", fg_console);
++	return vc_cons[fg_console].d->port.tty->driver;
++}
++
++/* Set led state to that specified by mask */
++static inline int set_leds(struct tty_driver* handler, unsigned int mask) {
++	return (handler->ops->ioctl) (vc_cons[fg_console].d->port.tty, KDSETLED,mask);
++}
++
++static unsigned int transform_mask(unsigned int original) {
++	int num, caps, scroll;
++	
++	num = (original >> 2) & 1;
++	caps = (original >> 1) & 1;
++	scroll = original & 1;
++	return (caps << 2) + (num << 1) + scroll;
++}
++
++static ssize_t ledctl_write(unsigned int led_mask) {
++	int res = 0;
++	printk(KERN_INFO "Ledctl: Writing %d", led_mask);
++	if ((res = set_leds(kbd_driver, transform_mask(led_mask))) != 0) {
++		printk(KERN_INFO "Ledctl: Call to set_leds failed\n");
++		return res;
++	}
++
++	return 0;
++}
++
++static int __init ledctl_init(void) {	
++	kbd_driver = get_kbd_driver_handler();
++	printk(KERN_INFO "Ledctl: Call started\n"); 
++	return 0;
++}
++
++static void __exit ledctl_exit(void) {
++	printk(KERN_INFO "Ledctl: Call ended\n"); 
++}
++
++SYSCALL_DEFINE1(ledctl, unsigned int, leds) {
++	int ret = 0;
++
++	if ((ret = ledctl_init()) != 0) {
++		return ret;
++	}
++	if (ret = ledctl_write(leds)) {
++		return ret;
++	}
++
++	ledctl_exit();
++	return 0;
++}
