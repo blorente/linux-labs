@@ -29,6 +29,15 @@ static inline int set_leds(struct tty_driver* handler, unsigned int mask) {
 	return (handler->ops->ioctl) (vc_cons[fg_console].d->port.tty, KDSETLED,mask);
 }
 
+static int transform_mask(int original) {
+	int num, caps, scroll;
+	
+	num = (original >> 2) & 1;
+	caps = (original >> 1) & 1;
+	scroll = original & 1;
+	return (caps << 2) + (num << 1) + scroll;
+}
+
 static ssize_t ledctl_write(struct file *filp, const char __user *buf, size_t len, loff_t *off) {
 	char *kbuf;
 	int written_bytes;
@@ -54,7 +63,7 @@ static ssize_t ledctl_write(struct file *filp, const char __user *buf, size_t le
 
 	if (sscanf(kbuf, "%x", &led_mask) == 1) {
 		printk(KERN_INFO "Ledctl: Writing %d", led_mask);
-		if (set_leds(kbd_driver, led_mask) != 0) {
+		if (set_leds(kbd_driver, transform_mask(led_mask)) != 0) {
 			printk(KERN_INFO "Ledctl: Call to set_leds failed\n");
 		}
 	}
