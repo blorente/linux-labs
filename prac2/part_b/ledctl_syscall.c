@@ -6,7 +6,6 @@
 #include <linux/kd.h>       /* For KDSETLED */
 #include <linux/vt_kern.h>
 
-static struct proc_dir_entry *proc_entry;
 struct tty_driver* kbd_driver= NULL;
 
 /* Get driver handler */
@@ -33,7 +32,7 @@ static unsigned int transform_mask(unsigned int original) {
 static ssize_t ledctl_write(unsigned int led_mask) {
 	int res = 0;
 	printk(KERN_INFO "Ledctl: Writing %d", led_mask);
-	if (res = set_leds(kbd_driver, transform_mask(led_mask)) != 0) {
+	if ((res = set_leds(kbd_driver, transform_mask(led_mask))) != 0) {
 		printk(KERN_INFO "Ledctl: Call to set_leds failed\n");
 		return res;
 	}
@@ -41,24 +40,20 @@ static ssize_t ledctl_write(unsigned int led_mask) {
 	return 0;
 }
 
-static const struct file_operations proc_entry_fops = {
-    .write = ledctl_write,
-};
-
 static int __init ledctl_init(void) {	
 	kbd_driver = get_kbd_driver_handler();
-	printk(KERN_INFO "Ledctl: Module loaded\n"); 
+	printk(KERN_INFO "Ledctl: Call started\n"); 
 	return 0;
 }
 
 static void __exit ledctl_exit(void) {
-    set_leds(kbd_driver,ALL_LEDS_OFF); 
+	printk(KERN_INFO "Ledctl: Call ended\n"); 
 }
 
 SYSCALL_DEFINE1(ledctl, unsigned int, leds) {
 	int ret = 0;
 
-	if (ret = ledctl_init() != 0) {
+	if ((ret = ledctl_init()) != 0) {
 		return ret;
 	}
 	if (ret = ledctl_write(leds)) {
@@ -68,6 +63,3 @@ SYSCALL_DEFINE1(ledctl, unsigned int, leds) {
 	ledctl_exit();
 	return 0;
 }
-
-MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Ledctl");
