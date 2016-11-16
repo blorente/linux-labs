@@ -13,9 +13,15 @@
 #define BLINK_DONE 300
 
 long ledctl( unsigned int mask ) {
-	printf("%d", mask);
+	//printf("Ledctl call: %d", mask);
 	return (long) syscall(__NR_LEDCTL, mask);
 }
+
+#define CALL(fun, mask) \
+	if (fun(mask) != 0) { \
+		perror("ERROR"); \
+		return -1; \
+	}
 
 void print_usage( void ) {
 	printf("Usage: ./ledctl <seconds-to-wait>\nExample: ./ledctl 5\n");
@@ -24,24 +30,26 @@ void print_usage( void ) {
 // This function only reads the value of loading
 // and is a pure function,
 // so there are no synchronization issues.
-void display_loading() {
+int display_loading() {
 	unsigned int mask = 1;
 
 	while (1) {
-		ledctl(1);
+		CALL(ledctl, 1);
 		sleep(300);
 		mask = (mask == 7) ? 1 : (mask << 1);
 	}
+	return 0;
 }
 
-void display_ready() {
+int display_ready() {
 	int i = 0;
 	for (i = 0; i < BLINK_DONE; i++) {
-		ledctl(0);
-		sleep(100);
-		ledctl(7);
-		sleep(100);
+		CALL(ledctl, 1);
+		sleep(0.5);
+		CALL(ledctl, 7);
+		sleep(0.5);
 	}
+	return 0;
 }
 
 int main(int argc, char** argv) { 
@@ -60,11 +68,17 @@ int main(int argc, char** argv) {
 
 	//display_loading();
 
+	/*
 	while (1) {
 		ledctl(1);
 		sleep(300);
 		//mask = (mask == 7) ? 1 : (mask << 1);
 	}
-
+	*/
+	if (display_ready() != 0) {
+		return -1;
+	}
+		
 	return 0;
+	
 }

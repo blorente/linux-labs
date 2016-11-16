@@ -32,7 +32,9 @@ static unsigned int transform_mask(unsigned int original) {
 static ssize_t ledctl_write(unsigned int led_mask) {
 	int res = 0;
 	printk(KERN_INFO "Ledctl: Writing %d", led_mask);
-	if ((res = set_leds(kbd_driver, transform_mask(led_mask))) != 0) {
+	unsigned int newMask = transform_mask(led_mask);
+	printk(KERN_INFO "Ledctl: Mask transformed from %d to %d\n", led_mask, newMask);	
+	if ((res = set_leds(kbd_driver, newMask)) != 0) {
 		printk(KERN_INFO "Ledctl: Call to set_leds failed\n");
 		return res;
 	}
@@ -57,6 +59,7 @@ SYSCALL_DEFINE1(ledctl, unsigned int, leds) {
 		return ret;
 	}
 	if (ret = ledctl_write(leds)) {
+		printk(KERN_INFO "Ledctl: Write failed");
 		return ret;
 	}
 
