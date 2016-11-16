@@ -180,6 +180,9 @@ static ssize_t blink_write(struct file *file, const char *user_buffer,
 			lednum = lednumtemp & 0xFF;
 			printk (KERN_INFO "Blinkdrv: ESCANEADO! LEDNUM: %i COLOR: %x\n", lednum, color);
 			create_message(message[lednum], lednum, color);
+		} else {
+			printk (KERN_INFO "Blinkdrv: Bad input: %s\n", auxTok);
+			return -EFAULT;
 		}
 	}	
 
