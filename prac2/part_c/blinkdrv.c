@@ -99,17 +99,16 @@ static int blink_release(struct inode *inode, struct file *file)
 #define NR_LEDS 8
 #define NR_BYTES_BLINK_MSG 6
 
-
-
 #define NR_SAMPLE_COLORS 4
 
 unsigned int sample_colors[]={0x000011, 0x110000, 0x001100, 0x000000};
 
-static void create_message(unsigned char *message, unsigned int color) {
+static void create_message(unsigned char *message, unsigned char target, unsigned int color) {
+	printk(KERN_INFO "Blinkdrv: Creating message (color: %x)\n", color);
 	/* Fill up the message accordingly */
 	message[0]='\x05';
 	message[1]=0x00;
-	message[2]=0; 
+	message[2]=target; 
 	message[3]=((color>>16) & 0xff);
  	message[4]=((color>>8) & 0xff);
  	message[5]=(color & 0xff);
@@ -125,7 +124,6 @@ static ssize_t blink_write(struct file *file, const char *user_buffer,
 	int retval = 0;
 	int i=0;
 	unsigned char message[NR_LEDS][NR_BYTES_BLINK_MSG];
-	static int color_cnt=0;
 	unsigned int color;
 	unsigned char lednum;
 	unsigned int lednumtemp;
@@ -138,9 +136,6 @@ static ssize_t blink_write(struct file *file, const char *user_buffer,
 
 	if ((*off) > 0)
     	return 0;
-
-	/* zero fill*/
-	memset(message, 0, NR_LEDS * NR_BYTES_BLINK_MSG);
 
 	/*
 	Equivalente a:
@@ -166,21 +161,37 @@ static ssize_t blink_write(struct file *file, const char *user_buffer,
 
 	kbuf[written_bytes] = '\0';	
 
+	/* Message setup */
+
+	/* zero fill*/
+	memset(message, 0, NR_LEDS * NR_BYTES_BLINK_MSG);
+
+	/* set initial targets */
+	for (i = 0; i < NR_LEDS; i++) {
+		message[i][2] = i;
+	}
+
 	printk(KERN_INFO "Blinkdrv: COPIADO! %s\n", kbuf);
 	while((auxTok = strsep(&kbuf, sep)) != NULL)
 	{
-		printk(KERN_INFO "Blinkdrv: PARTIDO! %s\n", auxTok);
+		printk(KERN_INFO "Blinkdrv: PARTIDO! %s", auxTok);
 		/* auxTok = "1:0x040304" -> lednum = 1, color = 0x040304 */
-		if (sscanf(auxTok, "%i:%x", &lednumtemp, &color) == 1) {
+		if (sscanf(auxTok, "%i:%x", &lednumtemp, &color) == 2) {
 			lednum = lednumtemp & 0xFF;
 			printk (KERN_INFO "Blinkdrv: ESCANEADO! LEDNUM: %i COLOR: %x\n", lednum, color);
-			create_message(message[lednum], color);
+			create_message(message[lednum], lednum, color);
 		}
+	}	
 
+	printk(KERN_INFO "Blinkdrv: Message dump");
+	for (i=0;i<NR_LEDS;i++) {
+		printk(KERN_INFO "			[%i]: %x\n", 
+			message[i][2], 
+			(message[i][3] << 16) | (message[i][4] << 8) | message[i][5]);		
 	}
 
 	for (i=0;i<NR_LEDS;i++){
-	
+		
 		/* 
 		 * Send message (URB) to the Blinkstick device 
 		 * and wait for the operation to complete 
