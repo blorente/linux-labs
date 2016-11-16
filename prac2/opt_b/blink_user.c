@@ -2,14 +2,17 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <string.h>
 
 #define MAX_PATH_LEN 80
 #define MAX_MESSAGE_LEN 80
 #define MAX_COMMAND_LEN 100
+#define MAX_LINE_LEN 256
+
 #define DRIVER_PATH "/dev/usb/blinkstick0"
 #define RED 0x050000
 #define GREEN 0x000500
-#define ORANGE 0xAA5D31
+#define BLUE 0x000005
 
 #define REPO_CLEAN 0
 #define REPO_STAGING 1
@@ -18,11 +21,11 @@
 char cwd[MAX_PATH_LEN];
 
 void print_usage( void ) {
-	printf("Usage: ./ledctl <seconds-to-wait>\nExample: ./ledctl 5\n");
+	printf("Usage: ./blink <led> <repo>\nExample: ./ledctl 0 /path/to/my_repo\n");
 }
 
-void compose_message(char *target, unsigned int color) {
-	sprintf(target, "%i:0x%x", 0, color);
+void compose_message(char *target, unsigned char led, unsigned int color) {
+	sprintf(target, "%i:0x%x", led, color);
 }
 
 int write_to_stick(char *message, int len) {
@@ -50,26 +53,41 @@ void fetch_repo_status(char *repo_to_watch) {
 }
 
 int get_repo_status(char *repo_to_watch) {
-	int status = REPO_CLEAN;
+	int status = REPO_UNSAVED;
+	FILE * statusfile;
+	char line[MAX_LINE_LEN];
+	
 	fetch_repo_status(repo_to_watch);
 
 	// Open .statusfile and read contents
-	
+	if (!(statusfile = fopen(".statusfile", "r"))) {
+		perror("Cannot read statusfiles");
+	}
+
+	while (fgets(line, MAX_LINE_LEN, statusfile) != NULL) {
+		if (strstr(line, "nothing to commit")) {
+			status = REPO_CLEAN;
+		} else if (strstr(line, "Changes ")) {
+			status = REPO_STAGING;
+		}
+	}
+
+	fclose(statusfile);
 	return status;
 }
 
-int display_repo_status(int status) {	
+int display_repo_status(unsigned char led, int status) {	
 	char message[MAX_MESSAGE_LEN];
 	unsigned int color;
 	if (status == REPO_CLEAN) {
 		color = GREEN;
 	} else if (status == REPO_STAGING) {
-		color = ORANGE;
+		color = BLUE;
 	} else {
 		color = RED;
 	}
 
-	compose_message(message, color);
+	compose_message(message, led, color);
 
 	if (write_to_stick(message, 10) != 0) {
 		perror("write_to_stick() error");
@@ -81,18 +99,26 @@ int display_repo_status(int status) {
 
 int main(int argc, char** argv) { 
 	char repo_to_watch[MAX_PATH_LEN];
+	int led_to_display;
 	int repo_status;
 
-	if (argc < 2) {
+	if (argc < 3) {
 		print_usage();
 		return 0;
 	}
 
-	if (sscanf(argv[1], "%s", repo_to_watch) != 1) {
+	if (sscanf(argv[1], "%i", &led_to_display) != 1) {
 		printf("Bad argument: %s\n", argv[1]);
 		print_usage();
 		return -1;
 	}
+
+	if (sscanf(argv[2], "%s", repo_to_watch) != 1) {
+		printf("Bad argument: %s\n", argv[2]);
+		print_usage();
+		return -1;
+	}
+
 
 	if (getcwd(cwd, sizeof(cwd)) == NULL) {    	
     	perror("getcwd() error");
@@ -100,7 +126,7 @@ int main(int argc, char** argv) {
 
 	repo_status = get_repo_status(repo_to_watch);
 	
-	if (display_repo_status(repo_status) != 0) {
+	if (display_repo_status(led_to_display, repo_status) != 0) {
 		return -1;
 	}	
 		
