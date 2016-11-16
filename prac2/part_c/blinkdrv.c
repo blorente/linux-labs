@@ -139,6 +139,9 @@ static ssize_t blink_write(struct file *file, const char *user_buffer,
 	if ((*off) > 0)
     	return 0;
 
+	/* zero fill*/
+	memset(message, 0, NR_LEDS * NR_BYTES_BLINK_MSG);
+
 	/*
 	Equivalente a:
 	if (len < MAX_CHAR) {
@@ -151,45 +154,32 @@ static ssize_t blink_write(struct file *file, const char *user_buffer,
 
 	kbuf = (char *)vmalloc(written_bytes + 1);
 	if (!kbuf) {		
-		printk(KERN_INFO "Ledctl: Not enough memory!\n");
+		printk(KERN_INFO "Blinkdrv: Not enough memory!\n");
 		return -ENOMEM;
 	}
 
 	if (copy_from_user( &kbuf[0], user_buffer, written_bytes )) {
-		printk(KERN_INFO "Ledctl: Panic! (failed copy_from_user)\n");
+		printk(KERN_INFO "Blinkdrv: Panic! (failed copy_from_user)\n");
 		vfree(kbuf);
 		return -EFAULT;
 	}
 
 	kbuf[written_bytes] = '\0';	
 
-	printk(KERN_INFO "COPIADO! %s\n", kbuf);
+	printk(KERN_INFO "Blinkdrv: COPIADO! %s\n", kbuf);
 	while((auxTok = strsep(&kbuf, sep)) != NULL)
 	{
-		printk(KERN_INFO "PARTIDO! %s\n", auxTok);
+		printk(KERN_INFO "Blinkdrv: PARTIDO! %s\n", auxTok);
 		/* auxTok = "1:0x040304" -> lednum = 1, color = 0x040304 */
 		if (sscanf(auxTok, "%i:%x", &lednumtemp, &color) == 1) {
 			lednum = lednumtemp & 0xFF;
-			printk (KERN_INFO "ESCANEADO! LEDNUM: %i COLOR: %x\n", lednum, color);
+			printk (KERN_INFO "Blinkdrv: ESCANEADO! LEDNUM: %i COLOR: %x\n", lednum, color);
+			create_message(message[lednum], color);
 		}
 
 	}
 
-	/* Pick a color and get ready for the next invocation*/		
-	color=sample_colors[color_cnt++];
-
-	/* Reset the color counter if necessary */	
-	if (color_cnt == NR_SAMPLE_COLORS)
-		color_cnt=0;
-	
-	/* zero fill*/
-	memset(message, 0, NR_LEDS * NR_BYTES_BLINK_MSG);
-
-	create_message(message[0], color);
-
 	for (i=0;i<NR_LEDS;i++){
-
-		message[0][2]=i; /* Change Led number in message */
 	
 		/* 
 		 * Send message (URB) to the Blinkstick device 
@@ -201,7 +191,7 @@ static ssize_t blink_write(struct file *file, const char *user_buffer,
 			 USB_DIR_OUT| USB_TYPE_CLASS | USB_RECIP_DEVICE,
 			 0x5,	/* wValue */
 			 0, 	/* wIndex=Endpoint # */
-			 message[0],	/* Pointer to the message */ 
+			 message[i],	/* Pointer to the message */ 
 			 NR_BYTES_BLINK_MSG, /* message's size in bytes */
 			 0);		
 
