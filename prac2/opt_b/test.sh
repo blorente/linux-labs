@@ -9,5 +9,5 @@ current_dir=$( pwd )
 
 make
 echo "" > /dev/usb/blinkstick0
-sudo ./blink "~/linux-labs"
+sudo ./blink "/home/linux-labs"
 make clean
