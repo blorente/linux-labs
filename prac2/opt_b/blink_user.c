@@ -122,13 +122,18 @@ int main(int argc, char** argv) {
 
 	if (getcwd(cwd, sizeof(cwd)) == NULL) {    	
     	perror("getcwd() error");
+    }
+
+    while(1) {    	
+		repo_status = get_repo_status(repo_to_watch);
+		
+		if (display_repo_status(led_to_display, repo_status) != 0) {
+			return -1;
+		}
+
+		sleep(2);	
     }	
 
-	repo_status = get_repo_status(repo_to_watch);
-	
-	if (display_repo_status(led_to_display, repo_status) != 0) {
-		return -1;
-	}	
 		
 	return 0;
 }
