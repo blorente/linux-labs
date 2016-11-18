@@ -114,7 +114,7 @@ static void create_message(unsigned char *message, unsigned char target, unsigne
  	message[5]=(color & 0xff);
 }
 
-#define MAX_CHAR 70
+#define MAX_CHAR 100
 
 /* Called when a user program invokes the write() system call on the device */
 static ssize_t blink_write(struct file *file, const char *user_buffer,
