@@ -1,10 +1,12 @@
 #include <stdio.h>
 #include <math.h>
+#include <complex.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <string.h>
 #include <time.h>
+#include <pthread.h>
 
 #define DRIVER_PATH "/dev/usb/blinkstick0"
 #define NR_LEDS 8
@@ -13,12 +15,26 @@
 #define PI 3.14159265
 #define MAX_MESSAGE_LEN 100
 
+enum {
+	BLUE_SHIFT = 0,
+	RED_SHIFT = 8,
+	GREEN_SHIFT = 16,
+	NUM_SHIFTS
+};
+
+/* Global variable to denote the color
+		being displayed. Only the main thread
+		can modify it, and the display thread
+		only reads it, so there are no data races.
+		*/
+int base_shift = BLUE_SHIFT; // BLUE color for now
+
 void print_usage( void ) {
 	printf("Usage: ./blink <led> <repo>\nExample: ./ledctl 0 /path/to/my_repo\n");
 }
 
 int compose_message(unsigned int *colors, char *target) {
-	sprintf(target, "0:0x%.6x,1:0x%.6x,2:0x%.6x,3:0x%.6x,4:0x%.6x,5:0x%.6x,6:0x%.6x,7:0x%.6x", 
+	sprintf(target, "0:0x%.6x,1:0x%.6x,2:0x%.6x,3:0x%.6x,4:0x%.6x,5:0x%.6x,6:0x%.6x,7:0x%.6x",
 		colors[0],
 		colors[1],
 		colors[2],
@@ -30,7 +46,7 @@ int compose_message(unsigned int *colors, char *target) {
 	return strlen(target) + 1;
 }
 
-int write_to_stick(int driver_file, char *message, int len) {	
+int write_to_stick(int driver_file, char *message, int len) {
 	if (lseek(driver_file, 1, SEEK_SET) < 0) {
 		printf("Seek operation failed\n");
 		return -1;
@@ -52,9 +68,11 @@ void init_starts(double step, double *starts) {
 
 void update_intensities(double elapsed, double *starts, double *intensities) {
 	int i;
+	double period = PI * 2;
+	double step = period / NR_LEDS;
 	for(i = 0; i < NR_LEDS; i++) {
-		double raw = sin((elapsed - starts[i]));
-		intensities[i] = raw * raw;
+		double raw = sin((elapsed - starts[i]) * (NR_LEDS * 2));
+		intensities[i] = cabs(raw);
 	}
 }
 
@@ -70,23 +88,23 @@ void update_colors(int base_shift, double *intensities, unsigned int *colors) {
 	}
 }
 
-int main(int argc, char** argv) {
+void execute_display( void ) {
 	double step = INTERVAL / NR_LEDS;
 	double elapsed;
 	double intensities[NR_LEDS];
 	double starts[NR_LEDS];
 	unsigned int colors[NR_LEDS];
-	int base_shift = 0; // BLUE color for now
 
 	char message[MAX_MESSAGE_LEN];
 	int message_len;
-
+/*
 	int driver_file;
 	driver_file = open(DRIVER_PATH, O_RDWR);
 	if (driver_file <= 0) {
 		printf("Open operation failed\n");
 		return -1;
 	}
+*/
 
 	printf("Step: %fms\n", step);
 
@@ -95,7 +113,7 @@ int main(int argc, char** argv) {
 	while(1) {
 		update_intensities(elapsed, starts, intensities);
 
-		printf("Intensities: %f %f %f %f %f %f %f %f\n", 
+		printf("Intensities: %f %f %f %f %f %f %f %f\n",
 			intensities[0],
 			intensities[1],
 			intensities[2],
@@ -107,7 +125,7 @@ int main(int argc, char** argv) {
 
 		update_colors(base_shift, intensities, colors);
 
-		printf("Colors: %x %x %x %x %x %x %x %x\n", 
+		printf("Colors: %x %x %x %x %x %x %x %x\n",
 			colors[0],
 			colors[1],
 			colors[2],
@@ -120,18 +138,48 @@ int main(int argc, char** argv) {
 		message_len = compose_message(colors, message);
 
 		printf("Composed Message: %s\n", message);
-
+/*
 		if (write_to_stick(driver_file, message, message_len) != 0) {
 			perror("Something went wrong");
 			close(driver_file);
 			return 1;
 		}
-
+*/
 		elapsed += step;
 		usleep(step);
 	}
 
-	close(driver_file);
-		
+	/*
+		close(driver_file);
+	*/
+}
+
+int main(int argc, char** argv) {
+	pthread_t display_thread;
+	if (pthread_create(&display_thread, NULL, (void *) (&execute_display), NULL) != 0) {
+		perror("ERROR");
+		return 1;
+	}
+
+	while(1) {
+		char color = getchar();
+		switch (color) {
+			case 'r':
+				printf("RED\n");
+				base_shift = RED_SHIFT;
+				break;
+			case 'g':
+				printf("GREEN\n");
+				base_shift = GREEN_SHIFT;
+				break;
+			case 'b':
+				printf("BLUE\n");
+				base_shift = BLUE_SHIFT;
+				break;
+		}
+
+		usleep(1000);
+	}
+
 	return 0;
 }
