@@ -10,23 +10,24 @@
 
 #define DRIVER_PATH "/dev/usb/blinkstick0"
 #define NR_LEDS 8
-#define INTERVAL 8000000
+#define INTERVAL 1000000
 #define BRIGHTNESS_COEFFICIENT 10 // Have the intensity of the colors
 #define PI 3.14159265
 #define MAX_MESSAGE_LEN 100
 
 enum {
 	BLUE_SHIFT = 0,
-	RED_SHIFT = 8,
-	GREEN_SHIFT = 16,
+	GREEN_SHIFT = 8,
+	RED_SHIFT = 16,
 	NUM_SHIFTS
 };
 
-/* Global variable to denote the color
-		being displayed. Only the main thread
-		can modify it, and the display thread
-		only reads it, so there are no data races.
-		*/
+/* 
+	Global variable to denote the color
+	being displayed. Only the main thread
+	can modify it, and the display thread
+	only reads it, so there are no data races.
+*/
 int base_shift = BLUE_SHIFT; // BLUE color for now
 
 void print_usage( void ) {
@@ -47,11 +48,6 @@ int compose_message(unsigned int *colors, char *target) {
 }
 
 int write_to_stick(int driver_file, char *message, int len) {
-	if (lseek(driver_file, 1, SEEK_SET) < 0) {
-		printf("Seek operation failed\n");
-		return -1;
-	}
-
 	if (write(driver_file, message, len) < 0) {
 		printf("Write operation failed\n");
 		return -1;
@@ -68,8 +64,6 @@ void init_starts(double step, double *starts) {
 
 void update_intensities(double elapsed, double *starts, double *intensities) {
 	int i;
-	double period = PI * 2;
-	double step = period / NR_LEDS;
 	for(i = 0; i < NR_LEDS; i++) {
 		double raw = sin((elapsed - starts[i]) * (NR_LEDS * 2));
 		intensities[i] = cabs(raw);
@@ -97,14 +91,13 @@ void execute_display( void ) {
 
 	char message[MAX_MESSAGE_LEN];
 	int message_len;
-/*
+
 	int driver_file;
 	driver_file = open(DRIVER_PATH, O_RDWR);
 	if (driver_file <= 0) {
 		printf("Open operation failed\n");
-		return -1;
+		return;
 	}
-*/
 
 	printf("Step: %fms\n", step);
 
@@ -138,24 +131,23 @@ void execute_display( void ) {
 		message_len = compose_message(colors, message);
 
 		printf("Composed Message: %s\n", message);
-/*
+
 		if (write_to_stick(driver_file, message, message_len) != 0) {
 			perror("Something went wrong");
 			close(driver_file);
-			return 1;
+			return;
 		}
-*/
+
 		elapsed += step;
 		usleep(step);
 	}
-
-	/*
-		close(driver_file);
-	*/
+	
+	close(driver_file);	
 }
 
 int main(int argc, char** argv) {
 	pthread_t display_thread;
+
 	if (pthread_create(&display_thread, NULL, (void *) (&execute_display), NULL) != 0) {
 		perror("ERROR");
 		return 1;

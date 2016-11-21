@@ -133,7 +133,6 @@ static ssize_t blink_write(struct file *file, const char *user_buffer,
 	char* auxTok;
 	const char* sep = ",";
 
-
 	if ((*off) > 0)
     	return 0;
 
@@ -215,7 +214,7 @@ static ssize_t blink_write(struct file *file, const char *user_buffer,
 		}
 	}
 
-	(*off)+=written_bytes;
+	//(*off)+=written_bytes;
 	vfree(kbuf);
 
 	return written_bytes;
