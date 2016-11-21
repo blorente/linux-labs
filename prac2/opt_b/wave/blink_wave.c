@@ -10,7 +10,7 @@
 
 #define DRIVER_PATH "/dev/usb/blinkstick0"
 #define NR_LEDS 8
-#define INTERVAL 1000000
+#define INTERVAL 500000
 #define BRIGHTNESS_COEFFICIENT 10 // Have the intensity of the colors
 #define PI 3.14159265
 #define MAX_MESSAGE_LEN 100

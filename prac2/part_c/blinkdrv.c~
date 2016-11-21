@@ -213,7 +213,8 @@ static ssize_t blink_write(struct file *file, const char *user_buffer,
 			goto out_error;		
 		}
 	}
-	
+
+	//(*off)+=written_bytes;
 	vfree(kbuf);
 
 	return written_bytes;
