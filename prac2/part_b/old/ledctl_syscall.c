@@ -29,23 +29,40 @@ static unsigned int transform_mask(unsigned int original) {
 	return (caps << 2) + (num << 1) + scroll;
 }
 
-SYSCALL_DEFINE1(ledctl, unsigned int, leds) {
-	int ret;
-	unsigned int newMask;
+static ssize_t ledctl_write(unsigned int led_mask) {
+	int res = 0;
+	printk(KERN_INFO "Ledctl: Writing %d", led_mask);
+	unsigned int newMask = transform_mask(led_mask);
+	printk(KERN_INFO "Ledctl: Mask transformed from %d to %d\n", led_mask, newMask);	
+	if ((res = set_leds(kbd_driver, newMask)) != 0) {
+		printk(KERN_INFO "Ledctl: Call to set_leds failed\n");
+		return res;
+	}
 
-	ret = 0;
+	return 0;
+}
 
+static int __init ledctl_init(void) {	
 	kbd_driver = get_kbd_driver_handler();
 	printk(KERN_INFO "Ledctl: Call started\n"); 
+	return 0;
+}
 
-	printk(KERN_INFO "Ledctl: Writing %d", leds);
-	newMask = transform_mask(leds);
-	printk(KERN_INFO "Ledctl: Mask transformed from %d to %d\n", leds, newMask);	
-	if ((ret = set_leds(kbd_driver, newMask)) != 0) {
-		printk(KERN_INFO "Ledctl: Call to set_leds failed\n");
+static void __exit ledctl_exit(void) {
+	printk(KERN_INFO "Ledctl: Call ended\n"); 
+}
+
+SYSCALL_DEFINE1(ledctl, unsigned int, leds) {
+	int ret = 0;
+
+	if ((ret = ledctl_init()) != 0) {
+		return ret;
+	}
+	if ((ret = ledctl_write(leds)) != 0) {
+		printk(KERN_INFO "Ledctl: Write failed");
 		return ret;
 	}
 
-	printk(KERN_INFO "Ledctl: Call ended\n"); 
-	return ret;
+	ledctl_exit();
+	return 0;
 }

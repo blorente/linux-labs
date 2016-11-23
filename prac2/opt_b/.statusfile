@@ -2,10 +2,18 @@
 # Changes not staged for commit:
 #   (use "git add <file>..." to update what will be committed)
 #   (use "git checkout -- <file>..." to discard changes in working directory)
-#   (commit or discard the untracked or modified content in submodules)
 #
-#	modified:   .statusfile
-#	modified:   test_repos/staging (modified content)
-#	modified:   test_repos/unsaved (new commits)
+#	modified:   ../../../opt_a/Makefile
+#	modified:   ../../.statusfile
+#	modified:   ../../../part_b/ledctl_syscall.c
+#	modified:   ../../../part_b/patch.diff
 #
+# Untracked files:
+#   (use "git add <file>..." to include in what will be committed)
+#
+#	../../../opt_a/Makefile~
+#	../../../opt_a/ledctl_thread
+#	../../../opt_a/leds_user_thread.c
+#	../../../opt_a/leds_user_thread.c~
+#	../../../part_b/old/
 no changes added to commit (use "git add" and/or "git commit -a")
