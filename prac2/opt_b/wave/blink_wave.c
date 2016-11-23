@@ -11,7 +11,7 @@
 #define DRIVER_PATH "/dev/usb/blinkstick0"
 #define NR_LEDS 8
 #define INTERVAL 500000
-#define BRIGHTNESS_COEFFICIENT 10 // Have the intensity of the colors
+#define BRIGHTNESS_COEFFICIENT 12 // Reduce the intensity of the colors
 #define PI 3.14159265
 #define MAX_MESSAGE_LEN 100
 
@@ -29,6 +29,12 @@ enum {
 	only reads it, so there are no data races.
 */
 int base_shift = BLUE_SHIFT; // BLUE color for now
+
+/* 
+	The reverse happens with this flag.
+	Only the display thread can write to it.
+*/
+int is_displaying = 1;
 
 void print_usage( void ) {
 	printf("Usage: ./blink <led> <repo>\nExample: ./ledctl 0 /path/to/my_repo\n");
@@ -103,6 +109,8 @@ void execute_display( void ) {
 
 	init_starts(step, starts);
 
+	is_displaying = 1;
+
 	while(1) {
 		update_intensities(elapsed, starts, intensities);
 
@@ -133,6 +141,7 @@ void execute_display( void ) {
 		printf("Composed Message: %s\n", message);
 
 		if (write_to_stick(driver_file, message, message_len) != 0) {
+			is_displaying = 0;
 			perror("Something went wrong");
 			close(driver_file);
 			return;
@@ -143,6 +152,7 @@ void execute_display( void ) {
 	}
 	
 	close(driver_file);	
+	is_displaying = 0;
 }
 
 int main(int argc, char** argv) {
@@ -153,7 +163,7 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 
-	while(1) {
+	while(is_displaying) {
 		char color = getchar();
 		switch (color) {
 			case 'r':
@@ -172,6 +182,8 @@ int main(int argc, char** argv) {
 
 		usleep(1000);
 	}
+
+	pthread_join(display_thread, NULL);
 
 	return 0;
 }
