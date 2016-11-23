@@ -68,6 +68,7 @@ int display_ready() {
 int main(int argc, char** argv) { 
 	pthread_t display_thread;
 	int error = 0;
+	void *retval;
 
 	if (argc < 2) {
 		print_usage();
@@ -83,16 +84,18 @@ int main(int argc, char** argv) {
 	seconds_to_wait *= 1000000;
 
 	display = 1;
-	if (pthread_create(&display_thread, NULL, (void *) (&display_loading), &error) != 0) {
+	if (pthread_create(&display_thread, NULL, (void *) (&display_loading), NULL) != 0) {
 		perror("ERROR");
 		return 1;
 	}
 
-	// Very long computation goes here
+	// Computación larga
 	usleep(seconds_to_wait);
+	// fin de computación larga
 
 	display = 0;
-	pthread_join(display_thread, error);	
+	pthread_join(display_thread, &retval);
+	error = (int)retval;	
 		
 	return error;
 	
