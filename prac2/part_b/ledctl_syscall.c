@@ -58,7 +58,7 @@ SYSCALL_DEFINE1(ledctl, unsigned int, leds) {
 	if ((ret = ledctl_init()) != 0) {
 		return ret;
 	}
-	if (ret = ledctl_write(leds)) {
+	if ((ret = ledctl_write(leds)) != 0) {
 		printk(KERN_INFO "Ledctl: Write failed");
 		return ret;
 	}
