@@ -9,7 +9,6 @@
 MODULE_LICENSE("GPL");
 
 #define MAX_CHAR 100
-static char *kbuf;
 
 /* Nodos de la lista */
 struct list_item_t {
@@ -21,35 +20,16 @@ struct list_head storage; /* Lista enlazada */
 
 static struct proc_dir_entry *proc_entry;
 
-static int allocate_kbuf(int num_bytes);
 static int append_to_list(int elem);
 static void remove_from_list(int elem);
 static void clear_list( void );
-
-int allocate_kbuf(int num_bytes) {
-  if (kbuf) 
-    vfree(kbuf);
-
-  kbuf = (char *)vmalloc(num_bytes);
-  if (!kbuf) {
-    printk(KERN_INFO "Modlist: Panic! (failed vmalloc)\n");
-    return 0;    
-  }
-
-  memset( kbuf, 0, num_bytes );
-  return num_bytes;
-}
 
 static ssize_t modlist_read(struct file *filp, char __user *buf, size_t len, loff_t *off) {
   int nr_bytes;
   char *result;
   struct list_item_t* item = NULL;
   struct list_head* cur_node = NULL;
-
-  /* Allocate space to compose the result, then write to user space*/
-  if ( allocate_kbuf(len) == 0) {
-    return -ENOMEM;
-  }
+  char kbuf[MAX_CHAR];
   
   printk(KERN_INFO "Modlist: Reading\n");
 
@@ -87,6 +67,7 @@ static ssize_t modlist_read(struct file *filp, char __user *buf, size_t len, lof
 static ssize_t modlist_write(struct file *filp, const char __user *buf, size_t len, loff_t *off) {
 
   int elem;
+  char kbuf[MAX_CHAR];
   
   if ((*off) > 0)
       return 0;
@@ -163,32 +144,19 @@ static const struct file_operations proc_entry_fops = {
 int init_modlist_module( void ) {
   int ret = 0;
 
-  INIT_LIST_HEAD(&storage);  
-
-  kbuf = (char *)vmalloc( MAX_CHAR );
-
-  if (!kbuf) {
-    printk(KERN_INFO "Modlist: Panic! (failed vmalloc)\n");
+  INIT_LIST_HEAD(&storage);
+  proc_entry = proc_create( "modlist", 0666, NULL, &proc_entry_fops);
+  if (proc_entry == NULL) {
     ret = -ENOMEM;
+    printk(KERN_INFO "Modlist: Can't create /proc entry\n");
   } else {
-
-    memset( kbuf, 0, MAX_CHAR );
-
-    proc_entry = proc_create( "modlist", 0666, NULL, &proc_entry_fops);
-    if (proc_entry == NULL) {
-      ret = -ENOMEM;
-      printk(KERN_INFO "Modlist: Can't create /proc entry\n");
-    } else {
-      printk(KERN_INFO "Modlist: Module loaded 1\n");
-    }    
+    printk(KERN_INFO "Modlist: Module loaded 1\n");
   }
-
   return ret;
 }
 
 
 void exit_modlist_module( void ) {
-  vfree(kbuf);
   clear_list();
   remove_proc_entry("modlist", NULL);
   printk(KERN_INFO "Modlist: Module unloaded.\n");
