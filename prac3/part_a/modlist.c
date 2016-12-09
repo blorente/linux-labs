@@ -92,7 +92,7 @@ static ssize_t modlist_write(struct file *filp, const char __user *buf, size_t l
       return -ENOMEM;    
   } else if (sscanf(kbuf, "remove %i", &elem) == 1) {
     remove_from_list(elem);
-  } else if (strcmp(kbuf, "cleanup") >= 0) {
+  } else if (strcmp(kbuf, "cleanup\n") == 0) {
     clear_list();
   } else {
     printk(KERN_INFO "Modlist: Writing (unrecognized option: %s)", kbuf);

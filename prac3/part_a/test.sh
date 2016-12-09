@@ -9,6 +9,8 @@ sudo echo "add 3" > /proc/modlist
 sudo echo $( cat /proc/modlist )
 sudo echo "remove 4" > /proc/modlist
 sudo echo $( cat /proc/modlist )
+sudo echo "cleanupsd" > /proc/modlist
+sudo echo $( cat /proc/modlist )
 sudo echo "cleanup" > /proc/modlist
 sudo echo $( cat /proc/modlist )
 make clean
