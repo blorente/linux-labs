@@ -8,6 +8,8 @@ MODULE_LICENSE("GPL");
 
 static struct proc_dir_entry *proc_entry;
 
+static ssize_t fifoproc_
+
 static ssize_t fifoproc_write(struct file *filp, const char __user *buf, size_t len, loff_t *off) {  
   if ((*off) > 0) /* The application can write in this entry just once !! */
     return 0;
