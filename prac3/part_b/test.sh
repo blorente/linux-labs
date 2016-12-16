@@ -1,6 +1,13 @@
 #!/bin/bash
+./setup.sh
+
+cd FifoTest
 make
-sudo insmod fifomod.ko
-sudo rmmod fifomod
-make clean
-dmesg | tail
+cd ..
+
+echo "Starting receiver..."
+sudo ./FifoTest/fifotest -f "/proc/fifoproc" -r &
+echo "Starting server..."
+sudo ./FifoTest/fifotest -f /proc/fifoproc -s
+
+./cleanup.sh

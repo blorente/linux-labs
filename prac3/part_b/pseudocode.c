@@ -7,24 +7,30 @@ void fifoproc_open(bool abre_para_lectura) {
 	if (abre_para_lectura) {
 		/* Bloqueo hasta que haya productores */
 		lock(mtx);
+		
+		/* Notificar que ya hay un consumidor */
+		cons_count++;
+
+		/* Esperar hasta que haya productores */
 		while(prod_count == 0) {
 			cond_wait(cons);
 		}
 
-		/* Notificar que ya hay un consumidor */
-		cons_count++;
 		cond_broadcast(prod);
 
 		unlock(mtx);
 	} else {
 		/* Bloqueo hasta que haya consumidores */
 		lock(mtx);
+		
+		/* Notificar que hay un escritor */
+		prod_count++;
+
+		/* Esperar hasta que haya consumidores */
 		while(cons_count == 0) {
 			cond_wait(prod);
 		}
 
-		/* Notificar que hay un escritor */
-		prod_count++;
 		cond_broadcast(cons);
 
 		unlock(mtx);
@@ -86,6 +92,11 @@ void fifoproc_release(bool lectura) {
 	if (lectura) {
 		lock(mtx);
 		cons_count--;
+
+		/* Puede que tengamos una ruptura de pipe */
+		if (cons_count == 0) {
+			cond_signal(prod);
+		}
 		unlock(mtx);
 	} else {
 		lock(mtx);
