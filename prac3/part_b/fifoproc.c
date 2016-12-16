@@ -21,15 +21,14 @@ int nr_prod_waiting = 0,nr_cons_waiting = 0;
 static cbuffer_t* cbuffer;
 
 static int fifoproc_open(struct inode *inode, struct file *file) {
+	/* 1.- Adquirir mutex */
+	// lock(&mutex)
+	if(down_interruptible(&sem_mutex)) {
+		return -EINTR;
+	}
 	if (file->f_mode & FMODE_READ) {
 		printk(KERN_INFO "fifoproc - READ: Starting open...\n");
 		/* Bloqueo hasta que haya productores */
-
-		/* 1.- Adquirir mutex */
-		// lock(&mutex)
-		if(down_interruptible(&sem_mutex)) {
-			return -EINTR;
-		}
 		
 		/* 2.- Registrarse como consumidor */
 		cons_count++;
@@ -55,28 +54,17 @@ static int fifoproc_open(struct inode *inode, struct file *file) {
 		}
 
 		/* 4.- Notificar que hay un consumidor */
-		// cond_broadcast(prod);
+		// cond_signal(prod);
 		printk(KERN_INFO "fifoproc - READ: Notifying producers...\n");
-		while (nr_prod_waiting > 0) {
+		if (nr_prod_waiting > 0) {
 			up(&sem_prod);
 			nr_prod_waiting--;
 		}
-
-		/* 5.- Soltar Mutex */
-		// unlock(&mutex);
-		printk(KERN_INFO "fifoproc - READ: Releasing mutex...\n");
-		up(&sem_mutex);
 
 		printk(KERN_INFO "fifoproc - READ: Done!\n");
 	} else {
 		printk(KERN_INFO "fifoproc - WRITE: Starting open...\n");
 		/* Bloqueo hasta que haya consumidores */
-
-		/* 1.- Adquirir mutex */
-		// lock(&mutex)
-		if(down_interruptible(&sem_mutex)) {
-			return -EINTR;
-		}
 
 		/* 2.- Registrarse como productor */
 		prod_count++;
@@ -102,75 +90,74 @@ static int fifoproc_open(struct inode *inode, struct file *file) {
 		}
 
 		/* 4.- Notificar que hay un productor */
-		// cond_broadcast(prod);
+		// cond_signal(prod);
 		printk(KERN_INFO "fifoproc - WRITE: Notifying consumers...\n");
-		while (nr_cons_waiting > 0) {
+		if (nr_cons_waiting > 0) {
 			up(&sem_cons);
 			nr_cons_waiting--;
 		}
-		
-		/* 5.- Soltar Mutex */
-		// unlock(&mutex);
-		printk(KERN_INFO "fifoproc - WRITE: Releasing mutex...\n");
-		up(&sem_mutex);
 
 		printk(KERN_INFO "fifoproc - WRITE: Done!\n");
 	}
+
+	/* 5.- Soltar Mutex */
+	// unlock(&mutex);
+	printk(KERN_INFO "fifoproc: Releasing mutex...\n");
+	up(&sem_mutex);
 	return 0;
 }
 
 static int fifoproc_release(struct inode *inode, struct file *file) {
+	/* 1.- Adquirir mutex */
+	// lock(mtx);
+	if(down_interruptible(&sem_mutex)) {
+		return -EINTR;
+	}
 	if (file->f_mode & FMODE_READ) {
-		/* 1.- Adquirir mutex */
-		// lock(mtx);
-		if(down_interruptible(&sem_mutex)) {
-			return -EINTR;
-		}
 
 		/* 2.- Darse de baja como consumidor */
 		printk(KERN_INFO "fifoproc - READ: Sign Out...\n");
-		cons_count--;
+		cons_count--;	
+
+		/* 3.- Señalizar productores */
+		// cond_signal(prod);
+		printk(KERN_INFO "fifoproc - READ: Notifying producers...\n");
+		if (nr_prod_waiting > 0) {
+			up(&sem_prod);
+			nr_prod_waiting--;
+		}	
 		
-		/* 3.- Si es necesario, vaciar el buffer */
-		if (cons_count == 0 && prod_count == 0) {
-			clear_cbuffer_t(cbuffer);
-		}
-
-		/* 4.- Devolver mutex */
-		// unlock(mtx);
-		printk(KERN_INFO "fifoproc - READ: Releasing mutex...\n");
-		up(&sem_mutex);
 	} else {
-		/* 1.- Adquirir mutex */
-		// lock(mtx);
-		if(down_interruptible(&sem_mutex)) {
-			return -EINTR;
-		}
-
-		/* 2.- Darse de baja como consumidor */
+		/* 2.- Darse de baja como productor */
 		printk(KERN_INFO "fifoproc - WRITE: Sign Out...\n");
 		prod_count--;
-				
-		/* 3.- Si es necesario, vaciar el buffer */
-		if (cons_count == 0 && prod_count == 0) {
-			clear_cbuffer_t(cbuffer);
+
+		/* 3.- Señalizar productores */
+		// cond_signal(cons);
+		printk(KERN_INFO "fifoproc - WRITE: Notifying consumers...\n");
+		if (nr_cons_waiting > 0) {
+			up(&sem_cons);
+			nr_cons_waiting--;
 		}
 
-		/* 4.- Devolver mutex */
-		// unlock(mtx);
-		printk(KERN_INFO "fifoproc - WRITE: Releasing mutex...\n");
-		up(&sem_mutex);
+	}
+	/* 4.- Si es necesario, vaciar el buffer */
+	if (cons_count == 0 && prod_count == 0) {
+		clear_cbuffer_t(cbuffer);
 	}
 
-
+	/* 5.- Devolver mutex */
+	// unlock(mtx);
+	printk(KERN_INFO "fifoproc: Releasing mutex...\n");
+	up(&sem_mutex);
 	return 0;
 }
 
 static ssize_t fifoproc_write(struct file *filp, const char __user *buf, size_t len, loff_t *off) {  
 	char kbuffer[MAX_CHARS_KBUF];
 
-	if ((*off) > 0)
-		return 0;
+	//if ((*off) > 0)
+	//	return 0;
 
 	if (len > MAX_CHARS_KBUF || len > BUFFER_LENGTH) {
 		return -ENOSPC;
@@ -179,7 +166,7 @@ static ssize_t fifoproc_write(struct file *filp, const char __user *buf, size_t 
 		return -EFAULT;
 	}
 
-	*off+=len;
+	//*off+=len;
 	printk(KERN_INFO "fifoproc - WRITE: Waiting to insert [%i] elems\n", len);
 
 	/* 1.- Adquirir mutex */
@@ -192,7 +179,9 @@ static ssize_t fifoproc_write(struct file *filp, const char __user *buf, size_t 
 	//while (nr_gaps_cbuffer_t(cbuffer) < len && cons_count > 0){
 	//	cond_wait(prod,mtx);
 	//}
-	while (nr_gaps_cbuffer_t(cbuffer) < len && cons_count > 0){
+	while ((BUFFER_LENGTH - size_cbuffer_t(cbuffer)) < len && cons_count > 0) {
+		printk(KERN_INFO "fifoproc - WRITE: Not enough gaps...\n");
+		
 		nr_prod_waiting++;
 		up(&sem_mutex);
 
@@ -245,7 +234,8 @@ static ssize_t fifoproc_read(struct file *filp, char __user *buf, size_t len, lo
 	//while(size_cbuffer_t(cbuffer) < nr_bytes) {
 	//	cond_wait(cons, mtx);
 	//}
-	while (size_cbuffer_t(cbuffer) < nr_bytes) {
+	while (size_cbuffer_t(cbuffer) < nr_bytes && prod_count > 0) {
+		printk(KERN_INFO "fifoproc - READ: Buffer empty...\n");	
 		nr_cons_waiting++;
 		up(&sem_mutex);
 
@@ -256,15 +246,23 @@ static ssize_t fifoproc_read(struct file *filp, char __user *buf, size_t len, lo
 			return -EINTR;
 		}	
 
+		printk(KERN_INFO "fifoproc - READ: Checking condvar...\n");	
 		if (down_interruptible(&sem_mutex)){
 			return -EINTR;
 		}
 	}
 
 	/* 3.- Consumir */
+	if(prod_count == 0 && is_empty_cbuffer_t(cbuffer)) {	
+		// unlock(mtx);
+		up(&sem_mutex);
+		return 0;
+	}
+
+	printk(KERN_INFO "fifoproc - READ: Reading from buffer...\n");	
 	remove_items_cbuffer_t(cbuffer, kbuffer, nr_bytes);
   
-	/* 4.- Despertar a los consumidores bloqueados (si hay alguno) */
+	/* 4.- Despertar a los productores bloqueados (si hay alguno) */
 	// cond_signal(prod);
 	if (nr_prod_waiting > 0) {
 		up(&sem_prod);	
@@ -281,8 +279,6 @@ static ssize_t fifoproc_read(struct file *filp, char __user *buf, size_t len, lo
 
 	if (copy_to_user(buf, kbuffer, nr_bytes))
 		return -EINVAL;
-
-	(*off)+=nr_bytes;
 
 	return nr_bytes; 
 }
