@@ -48,12 +48,6 @@ int fifoproc_write(char* buff, int len) {
 		cond_wait(prod,mtx);
 	}
 
-	/* Detectar fin de comunicación por error (consumidor cierra FIFO antes) */
-	if (cons_count==0) {
-		unlock(mtx); 
-		return -EPIPE;
-	}
-
 	/* Producir */
 	insert_items_cbuffer_t(cbuffer,kbuffer,len);
 

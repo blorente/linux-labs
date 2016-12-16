@@ -64,7 +64,7 @@ static int fifoproc_open(struct inode *inode, struct file *file) {
 		printk(KERN_INFO "fifoproc - READ: Done!\n");
 	} else {
 		printk(KERN_INFO "fifoproc - WRITE: Starting open...\n");
-		/* Bloqueo hasta que haya productores */
+		/* Bloqueo hasta que haya consumidores */
 
 		/* 1.- Adquirir mutex */
 		// lock(&mutex)
@@ -114,7 +114,37 @@ static int fifoproc_open(struct inode *inode, struct file *file) {
 }
 
 static int fifoproc_release(struct inode *inode, struct file *file) {
-	printk(KERN_INFO "fifoproc: release\n");
+	if (file->f_mode & FMODE_READ) {
+		/* 1.- Adquirir mutex */
+		// lock(mtx);
+		if(down_interruptible(&sem_mutex)) {
+			return -EINTR;
+		}
+
+		/* 2.- Darse de baja como consumidor */
+		printk(KERN_INFO "fifoproc - READ: Sign Out...\n");
+		cons_count--;
+		
+		/* 3.- Devolver mutex */
+		// unlock(mtx);
+		printk(KERN_INFO "fifoproc - READ: Releasing mutex...\n");
+		up(&sem_mutex);
+	} else {
+		/* 1.- Adquirir mutex */
+		// lock(mtx);
+		if(down_interruptible(&sem_mutex)) {
+			return -EINTR;
+		}
+
+		/* 2.- Darse de baja como consumidor */
+		printk(KERN_INFO "fifoproc - WRITE: Sign Out...\n");
+		prod_count--;
+		
+		/* 3.- Devolver mutex */
+		// unlock(mtx);
+		printk(KERN_INFO "fifoproc - WRITE: Releasing mutex...\n");
+		up(&sem_mutex);
+	}
 	return 0;
 }
 
