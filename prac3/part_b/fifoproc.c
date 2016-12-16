@@ -1,11 +1,17 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/proc_fs.h>
+#include <linux/string.h>
+#include <linux/vmalloc.h>
+#include <asm-generic/uaccess.h>
+#include <asm-generic/errno.h>
+#include <linux/semaphore.h>
 #include "cbuffer.h"
 
 MODULE_LICENSE("GPL");
 
 #define BUFFER_LENGTH 50
+#define MAX_CHARS_KBUF 50
 
 static struct proc_dir_entry *proc_entry;
 struct semaphore sem_mutex; //mutex mtx;
@@ -149,23 +155,125 @@ static int fifoproc_release(struct inode *inode, struct file *file) {
 }
 
 static ssize_t fifoproc_write(struct file *filp, const char __user *buf, size_t len, loff_t *off) {  
-  if ((*off) > 0) /* The application can write in this entry just once !! */
-    return 0;
-   
-  *off+=len; /* Update the file pointer */
-  
-  return len;
+	char kbuffer[MAX_CHARS_KBUF];
+
+	if ((*off) > 0)
+		return 0;
+
+	if (len > MAX_CHARS_KBUF - 1) {
+		return -ENOSPC;
+	}
+	if (copy_from_user( kbuffer, buf, len )) {
+		return -EFAULT;
+	}
+
+	kbuffer[len] ='\0'; 
+	*off+=len;
+	printk(KERN_INFO "fifoproc - WRITE: Waiting to insert [%s]\n", kbuffer);
+
+	/* 1.- Adquirir mutex */
+	// lock(&mutex)
+	if(down_interruptible(&sem_mutex)) {
+		return -EINTR;
+	}
+
+	/* 2.- Esperar hasta que haya hueco para insertar (debe haber consumidores) */
+	//while (nr_gaps_cbuffer_t(cbuffer) < len && cons_count > 0){
+	//	cond_wait(prod,mtx);
+	//}
+	while (nr_gaps_cbuffer_t(cbuffer) < len && cons_count > 0){
+		nr_prod_waiting++;
+		up(&sem_mutex);
+
+		/* Bloqueo en cola de espera */		
+		if (down_interruptible(&sem_prod)){
+			down(&sem_mutex);
+			nr_prod_waiting--;
+			up(&sem_mutex);		
+			return -EINTR;
+		}
+
+		if (down_interruptible(&sem_mutex)){
+			return -EINTR;
+		}	
+	}
+
+	/* 3.- Producir */
+	printk(KERN_INFO "fifoproc - WRITE: Inserting into buffer...\n");
+	insert_items_cbuffer_t(cbuffer,kbuffer,len);
+
+	/* 4.- Despertar a posible consumidor bloqueado */
+	// cond_signal(cons);
+	if (nr_cons_waiting > 0) {
+		up(&sem_cons);	
+		nr_cons_waiting--;
+  	}
+	
+	/* 5.- Soltar Mutex */
+	// unlock(&mutex);
+	printk(KERN_INFO "fifoproc - WRITE: Releasing mutex...\n");
+	up(&sem_mutex);
+
+	return len;
 }
 
 static ssize_t fifoproc_read(struct file *filp, char __user *buf, size_t len, loff_t *off) {  
-  int nr_bytes;
+	int nr_bytes = len > BUFFER_LENGTH ? BUFFER_LENGTH : len;
+	char kbuffer[BUFFER_LENGTH];
   
-  if ((*off) > 0) /* Tell the application that there is nothing left to read */
-      return 0;
-    
-  (*off)+=len;  /* Update the file pointer */
+	if ((*off) > 0) 
+		return 0;
 
-  return nr_bytes; 
+	/* 1.- Adquirir mutex */
+	// lock(&mutex)
+	if (down_interruptible(&sem_mutex)) {
+		return -EINTR;
+	}
+
+	/* 2.- Bloquearse mientras buffer no contenga los elementos que necesitamos */
+	//while(size_cbuffer_t(cbuffer) < nr_bytes) {
+	//	cond_wait(cons, mtx);
+	//}
+	while (size_cbuffer_t(cbuffer) < nr_bytes) {
+		nr_cons_waiting++;
+		up(&sem_mutex);
+
+		if (down_interruptible(&sem_cons)){
+			down(&sem_mutex);
+			nr_cons_waiting--;
+			up(&sem_mutex);		
+			return -EINTR;
+		}	
+
+		if (down_interruptible(&sem_mutex)){
+			return -EINTR;
+		}
+	}
+
+	/* 3.- Consumir */
+	remove_items_cbuffer_t(cbuffer, kbuffer, nr_bytes);
+  
+	/* 4.- Despertar a los consumidores bloqueados (si hay alguno) */
+	// cond_signal(prod);
+	if (nr_prod_waiting > 0) {
+		up(&sem_prod);	
+		nr_prod_waiting--;
+	}
+
+	/* 5.- Salir de la sección crítica */	
+	// unlock(mtx);
+	up(&sem_mutex);
+
+	/* 6.- Escribir el valor en el espacio de usuario */
+	if (len < nr_bytes)
+		return -ENOSPC;
+
+	if (copy_to_user(buf, kbuffer, nr_bytes))
+		return -EINVAL;
+
+	(*off)+=nr_bytes;
+
+	return nr_bytes; 
 }
 
 static const struct file_operations proc_entry_fops = {

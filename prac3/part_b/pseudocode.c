@@ -70,15 +70,16 @@ int fifoproc_read(const char* buff, int len) {
 	while(size_cbuffer_t(cbuffer) < len) {
 		cond_wait(cons, mtx);
 	}
-
+	
 	/* Consumir */
 	remove_items_cbuffer_t(cbuffer, kbuffer, len);
-	copy_to_user(buff, kbuffer, len);
 
 	/* Señalar que hemos consumido */
 	cond_signal(prod);
 
 	unlock(mtx);
+
+	copy_to_user(buff, kbuffer, len);
 	return len;
 }
 
