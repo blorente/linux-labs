@@ -65,6 +65,7 @@ int fifoproc_read(const char* buff, int len) {
 		cond_wait(cons, mtx);
 	}
 
+	/* Salida al leer EOF */
 	if(prod_count == 0 && is_empty_cbuffer_t(cbuffer)) {
 		unlock(mtx);
 		return 0;
