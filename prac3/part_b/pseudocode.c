@@ -70,7 +70,7 @@ int fifoproc_read(const char* buff, int len) {
 	while(size_cbuffer_t(cbuffer) < len) {
 		cond_wait(cons, mtx);
 	}
-	
+
 	/* Consumir */
 	remove_items_cbuffer_t(cbuffer, kbuffer, len);
 
@@ -86,17 +86,19 @@ int fifoproc_read(const char* buff, int len) {
 void fifoproc_release(bool lectura) {
 	if (lectura) {
 		lock(mtx);
-		cons_count--;
-
-		/* Puede que tengamos una ruptura de pipe */
-		if (cons_count == 0) {
-			cond_signal(prod);
-		}
+		cons_count--;	
 		unlock(mtx);
 	} else {
 		lock(mtx);
 		prod_count--;
 		unlock(mtx);
+	}
+
+	/* Dado que las operaciones de decremento de prod/cons_count
+		son secciones críticas, se garantiza que esta condición
+		no se cumplirá más de una vez */
+	if (cons_count == 0 && prod_count == 0) {
+		clear_cbuffer_t(cbuffer);
 	}
 }
 

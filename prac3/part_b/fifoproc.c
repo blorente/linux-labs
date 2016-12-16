@@ -11,7 +11,7 @@
 MODULE_LICENSE("GPL");
 
 #define BUFFER_LENGTH 50
-#define MAX_CHARS_KBUF 50
+#define MAX_CHARS_KBUF 40
 
 static struct proc_dir_entry *proc_entry;
 struct semaphore sem_mutex; //mutex mtx;
@@ -131,7 +131,12 @@ static int fifoproc_release(struct inode *inode, struct file *file) {
 		printk(KERN_INFO "fifoproc - READ: Sign Out...\n");
 		cons_count--;
 		
-		/* 3.- Devolver mutex */
+		/* 3.- Si es necesario, vaciar el buffer */
+		if (cons_count == 0 && prod_count == 0) {
+			clear_cbuffer_t(cbuffer);
+		}
+
+		/* 4.- Devolver mutex */
 		// unlock(mtx);
 		printk(KERN_INFO "fifoproc - READ: Releasing mutex...\n");
 		up(&sem_mutex);
@@ -145,12 +150,19 @@ static int fifoproc_release(struct inode *inode, struct file *file) {
 		/* 2.- Darse de baja como consumidor */
 		printk(KERN_INFO "fifoproc - WRITE: Sign Out...\n");
 		prod_count--;
-		
-		/* 3.- Devolver mutex */
+				
+		/* 3.- Si es necesario, vaciar el buffer */
+		if (cons_count == 0 && prod_count == 0) {
+			clear_cbuffer_t(cbuffer);
+		}
+
+		/* 4.- Devolver mutex */
 		// unlock(mtx);
 		printk(KERN_INFO "fifoproc - WRITE: Releasing mutex...\n");
 		up(&sem_mutex);
 	}
+
+
 	return 0;
 }
 
@@ -160,16 +172,15 @@ static ssize_t fifoproc_write(struct file *filp, const char __user *buf, size_t 
 	if ((*off) > 0)
 		return 0;
 
-	if (len > MAX_CHARS_KBUF - 1) {
+	if (len > MAX_CHARS_KBUF || len > BUFFER_LENGTH) {
 		return -ENOSPC;
 	}
 	if (copy_from_user( kbuffer, buf, len )) {
 		return -EFAULT;
 	}
 
-	kbuffer[len] ='\0'; 
 	*off+=len;
-	printk(KERN_INFO "fifoproc - WRITE: Waiting to insert [%s]\n", kbuffer);
+	printk(KERN_INFO "fifoproc - WRITE: Waiting to insert [%i] elems\n", len);
 
 	/* 1.- Adquirir mutex */
 	// lock(&mutex)
