@@ -14,8 +14,6 @@ MODULE_LICENSE("GPL");
 /* Based on code from Juan Carlos Saez */
 
 #define BUFFER_LENGTH 24
-#define EMERGENCY_THRESHOLD 12
-#define MAX_RANDOM 100
 
 /* Cbuffer for the Top Half */
 static cbuffer_t* cbuffer;
@@ -109,21 +107,21 @@ void flush_wq_function(struct work_struct *work) {
 
 void fire_timer(unsigned long data) {
     /* Create random number to insert */
-    unsigned int to_insert = get_random_int() % MAX_RANDOM;
+    unsigned int to_insert = get_random_int() % max_random;
     printk(KERN_INFO "Modtimer: int to insert [%i]\n", to_insert);
 
     /* Insert into buffer to be flushed into list */
     insert_items_cbuffer_t(cbuffer, (char *)&to_insert, 4);
 
-    if (size_cbuffer_t(cbuffer) >= EMERGENCY_THRESHOLD) {
+    if (size_cbuffer_t(cbuffer) >= emergency_threshold) {
         /* Create deferred work in another CPU */        
         int cpu_to_use = select_cpu();
         /* Enqueue work */     
         schedule_flush(cpu_to_use);
     }
 
-    /* Re-activate the timer one second from now */
-    mod_timer( &(my_timer), jiffies + HZ); 
+    /* Re-activate the timer timer_period_ms from now */
+    mod_timer( &(my_timer), jiffies + timer_period_ms); 
 }
 
 ssize_t modconfig_read(struct file *filp, char __user *buf, size_t len, loff_t *off) {
@@ -217,7 +215,7 @@ int init_timer_module( void ) {
     /* Initialize field */
     my_timer.data=0;
     my_timer.function=fire_timer;
-    my_timer.expires=jiffies + HZ;  /* Activate it one second from now */
+    my_timer.expires=jiffies + timer_period_ms;  /* Activate it one second from now */
     /* Activate the timer for the first time */
     add_timer(&my_timer);
     
