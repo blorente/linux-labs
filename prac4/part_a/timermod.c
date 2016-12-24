@@ -13,54 +13,43 @@
 MODULE_LICENSE("GPL");
 /* Based on code from Juan Carlos Saez */
 
-#define MAX_NUM_TO_INSERT 100
 #define BUFFER_LENGTH 24
 #define EMERGENCY_THRESHOLD 12
+#define MAX_RANDOM 100
 
-struct timer_list my_timer; /* Structure that describes the kernel timer */
+/* Cbuffer for the Top Half */
+static cbuffer_t* cbuffer;
 
-/* Nodes of the list */
+/* Functions to manipulate the list */
 struct list_item_t {
   unsigned int data;
   struct list_head storage_links;
 } list_item_t;
 struct list_head storage; /* Linked list to store numbers */
-
-/* Cbuffer for the Top Half */
-static cbuffer_t* cbuffer;
-
-/* Work descriptor */
-struct work_struct flush_work_data;
-
-/* Functions to manipulate the list */
 static int append_to_list(unsigned int elem);
 static void remove_from_list(int elem);
 static void clear_list( void );
 
 /* Functions to schedule work */
+struct timer_list my_timer;
+struct work_struct flush_work_data;
 static int select_cpu( void );
 static void schedule_flush(int cpu_to_use);
-static void flush_wq_function( struct work_struct *work );
+static void flush_wq_function(struct work_struct *work);
+static void fire_timer(unsigned long data);
 
-/* Function invoked when timer expires (fires) */
-static void fire_timer(unsigned long data) {
-    /* Create random number to insert */
-    unsigned int to_insert = get_random_int() % MAX_NUM_TO_INSERT;
-    printk(KERN_INFO "Modtimer: int to insert [%i]\n", to_insert);
-
-    /* Insert into buffer to be flushed into list */
-    insert_items_cbuffer_t(cbuffer, (char *)&to_insert, 4);
-
-    if (size_cbuffer_t(cbuffer) >= EMERGENCY_THRESHOLD) {
-        /* Create deferred work in another CPU */        
-        int cpu_to_use = select_cpu();
-        /* Enqueue work */     
-        schedule_flush(cpu_to_use);
-    }
-
-    /* Re-activate the timer one second from now */
-    mod_timer( &(my_timer), jiffies + HZ); 
-}
+/* Functions for modconfig proc entry */
+#define MAX_KBUF_MODCONFIG 100
+static struct proc_dir_entry *modconfig_proc_entry;
+volatile int timer_period_ms = 500;
+volatile int emergency_threshold = 12;
+volatile int max_random = 100;
+static ssize_t modconfig_read(struct file *filp, char __user *buf, size_t len, loff_t *off);
+static ssize_t modconfig_write(struct file *filp, const char __user *buf, size_t len, loff_t *off);
+static const struct file_operations modconfig_entry_fops = {
+    .read = modconfig_read,
+    .write = modconfig_write,
+};
 
 int append_to_list(unsigned int elem) {
   struct list_item_t *new_item = (struct list_item_t *)vmalloc(sizeof(struct list_item_t));
@@ -118,31 +107,93 @@ void flush_wq_function(struct work_struct *work) {
     }
 }
 
-int init_timer_module( void ) {
-    int ret = 0;
+void fire_timer(unsigned long data) {
+    /* Create random number to insert */
+    unsigned int to_insert = get_random_int() % MAX_RANDOM;
+    printk(KERN_INFO "Modtimer: int to insert [%i]\n", to_insert);
 
+    /* Insert into buffer to be flushed into list */
+    insert_items_cbuffer_t(cbuffer, (char *)&to_insert, 4);
+
+    if (size_cbuffer_t(cbuffer) >= EMERGENCY_THRESHOLD) {
+        /* Create deferred work in another CPU */        
+        int cpu_to_use = select_cpu();
+        /* Enqueue work */     
+        schedule_flush(cpu_to_use);
+    }
+
+    /* Re-activate the timer one second from now */
+    mod_timer( &(my_timer), jiffies + HZ); 
+}
+
+ssize_t modconfig_read(struct file *filp, char __user *buf, size_t len, loff_t *off) {
+    char kbuf[MAX_KBUF_MODCONFIG];
+    char *result;
+    int nr_bytes = 0;
+
+    if ((*off) > 0)
+      return 0;
+
+    /* Use result as a writing head */
+    result = &kbuf[0];
+    result += sprintf(result, "timer_period_ms=%i\n", timer_period_ms);
+    result += sprintf(result, "emergency_threshold=%i\n", emergency_threshold);
+    result += sprintf(result, "max_random=%i\n", max_random);
+
+    printk(KERN_INFO "Modtimer: Read modconfig: %s\n", kbuf);
+
+    nr_bytes = result - kbuf;
+
+    if (len < nr_bytes)
+        return -ENOSPC;
+  
+    if (copy_to_user(buf, &kbuf[0], nr_bytes))
+        return -EINVAL;
+
+    (*off) += len;
+
+    return nr_bytes; 
+}
+
+ssize_t modconfig_write(struct file *filp, const char __user *buf, size_t len, loff_t *off) {
+    return len;
+}
+
+int init_timer_module( void ) {
     /* Create cbuffer for the top half */
     cbuffer = create_cbuffer_t(BUFFER_LENGTH);
     if (cbuffer == NULL) {
-        ret = -ENOMEM;
         printk(KERN_INFO "Modtimer: Cannot allocate cbuffer\n");
-    } else {
-        /* Initialize linked list */
-        INIT_LIST_HEAD(&storage);
-
-        /* Initialize work struct */
-        INIT_WORK(&flush_work_data, flush_wq_function);
-
-        /* Create timer */
-        init_timer(&my_timer);
-        /* Initialize field */
-        my_timer.data=0;
-        my_timer.function=fire_timer;
-        my_timer.expires=jiffies + HZ;  /* Activate it one second from now */
-        /* Activate the timer for the first time */
-        add_timer(&my_timer);
+        return-ENOMEM;
     }
-    return ret;
+    
+    /* Create modconfig /proc entry */
+    modconfig_proc_entry = proc_create( "modconfig", 0666, NULL, &modconfig_entry_fops);
+    if (modconfig_proc_entry == NULL) {
+        printk(KERN_INFO "Modlist: Can't create /proc/modconfig entry\n");
+
+        /* Cleanup */
+        destroy_cbuffer_t(cbuffer);
+
+        return -ENOMEM;
+    }
+
+    /* Initialize linked list */
+    INIT_LIST_HEAD(&storage);
+
+    /* Initialize work struct */
+    INIT_WORK(&flush_work_data, flush_wq_function);
+
+    /* Create timer */
+    init_timer(&my_timer);
+    /* Initialize field */
+    my_timer.data=0;
+    my_timer.function=fire_timer;
+    my_timer.expires=jiffies + HZ;  /* Activate it one second from now */
+    /* Activate the timer for the first time */
+    add_timer(&my_timer);
+    
+    return 0;
 }
 
 void cleanup_timer_module( void ) {
@@ -151,6 +202,9 @@ void cleanup_timer_module( void ) {
 
     /* Destroy top half buffer */
     destroy_cbuffer_t(cbuffer);
+
+    /* Remove /proc entries */
+    remove_proc_entry("modconfig", NULL);
     
     /* Wait until completion of the timer function (if it's currently running) and delete timer */
     del_timer_sync(&my_timer);
