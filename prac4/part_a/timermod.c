@@ -17,6 +17,7 @@ MODULE_LICENSE("GPL");
 
 /* Cbuffer for the Top Half */
 static cbuffer_t* cbuffer;
+DEFINE_SPINLOCK(cbuffer_sl);
 
 /* Functions to manipulate the list */
 struct list_item_t {
@@ -96,24 +97,34 @@ void schedule_flush(int cpu_to_use) {
 
 void flush_wq_function(struct work_struct *work) {
     unsigned int num_to_insert = 0;
+    unsigned long lock_flags = 0;
     /* Flush the buffer into the linked list */
     printk(KERN_INFO "Modtimer: Work started\n");
+    
+    spin_lock_irqsave(&cbuffer_sl, lock_flags);
     while(size_cbuffer_t(cbuffer) >= sizeof(int)) {
         remove_items_cbuffer_t(cbuffer, (char *)&num_to_insert, sizeof(int));
         printk(KERN_INFO "Modtimer: Inserting elem %i into list\n", num_to_insert);
         append_to_list(num_to_insert);
     }
+    spin_unlock_irqrestore(&cbuffer_sl, lock_flags);
 }
 
 void fire_timer(unsigned long data) {
     /* Create random number to insert */
     unsigned int to_insert = get_random_int() % max_random;
+    unsigned int current_size = 0;
+    unsigned long lock_flags = 0;
     printk(KERN_INFO "Modtimer: int to insert [%i]\n", to_insert);
 
     /* Insert into buffer to be flushed into list */
+    spin_lock_irqsave(&cbuffer_sl, lock_flags);
     insert_items_cbuffer_t(cbuffer, (char *)&to_insert, 4);
+    current_size = size_cbuffer_t(cbuffer);
+    spin_unlock_irqrestore(&cbuffer_sl, lock_flags);
 
-    if (size_cbuffer_t(cbuffer) >= emergency_threshold) {
+    /* Enqueue flush if necessary */
+    if (current_size >= emergency_threshold) {
         /* Create deferred work in another CPU */        
         int cpu_to_use = select_cpu();
         /* Enqueue work */     
