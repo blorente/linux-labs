@@ -6,6 +6,7 @@
 #include <linux/random.h>
 #include <linux/vmalloc.h>
 #include <linux/list.h>
+#include <linux/smp.h>
 #include <asm-generic/uaccess.h>
 #include "cbuffer.h"
 
@@ -13,7 +14,8 @@ MODULE_LICENSE("GPL");
 /* Based on code from Juan Carlos Saez */
 
 #define MAX_NUM_TO_INSERT 100
-#define BUFFER_LENGTH 10
+#define BUFFER_LENGTH 24
+#define EMERGENCY_THRESHOLD 12
 
 struct timer_list my_timer; /* Structure that describes the kernel timer */
 
@@ -27,21 +29,34 @@ struct list_head storage; /* Linked list to store numbers */
 /* Cbuffer for the Top Half */
 static cbuffer_t* cbuffer;
 
+/* Work descriptor */
+struct work_struct flush_work_data;
+
 /* Functions to manipulate the list */
 static int append_to_list(unsigned int elem);
 static void remove_from_list(int elem);
 static void clear_list( void );
 
+/* Functions to schedule work */
+static int select_cpu( void );
+static void schedule_flush(int cpu_to_use);
+static void flush_wq_function( struct work_struct *work );
+
 /* Function invoked when timer expires (fires) */
 static void fire_timer(unsigned long data) {
     /* Create random number to insert */
-    char to_insert;
-    get_random_bytes(&to_insert, 1);
-    to_insert = to_insert % MAX_NUM_TO_INSERT;
+    unsigned int to_insert = get_random_int() % MAX_NUM_TO_INSERT;
     printk(KERN_INFO "Modtimer: int to insert [%i]\n", to_insert);
 
     /* Insert into buffer to be flushed into list */
-    insert_cbuffer_t(cbuffer, to_insert);
+    insert_items_cbuffer_t(cbuffer, (char *)&to_insert, 4);
+
+    if (size_cbuffer_t(cbuffer) >= EMERGENCY_THRESHOLD) {
+        /* Create deferred work in another CPU */        
+        int cpu_to_use = select_cpu();
+        /* Enqueue work */     
+        schedule_flush(cpu_to_use);
+    }
 
     /* Re-activate the timer one second from now */
     mod_timer( &(my_timer), jiffies + HZ); 
@@ -82,9 +97,30 @@ void clear_list() {
   }
 }
 
+int select_cpu() {
+    int current_cpu = smp_processor_id();
+    return (current_cpu + 1) % 2;
+}
+
+void schedule_flush(int cpu_to_use) {
+    printk(KERN_INFO "Modtimer: Schedule work on cpu %i\n", cpu_to_use);
+    schedule_work_on(cpu_to_use, &flush_work_data);
+}
+
+void flush_wq_function(struct work_struct *work) {
+    unsigned int num_to_insert = 0;
+    /* Flush the buffer into the linked list */
+    printk(KERN_INFO "Modtimer: Work started\n");
+    while(size_cbuffer_t(cbuffer) >= sizeof(int)) {
+        remove_items_cbuffer_t(cbuffer, (char *)&num_to_insert, sizeof(int));
+        printk(KERN_INFO "Modtimer: Inserting elem %i into list\n", num_to_insert);
+        append_to_list(num_to_insert);
+    }
+}
+
 int init_timer_module( void ) {
     int ret = 0;
-    
+
     /* Create cbuffer for the top half */
     cbuffer = create_cbuffer_t(BUFFER_LENGTH);
     if (cbuffer == NULL) {
@@ -93,6 +129,9 @@ int init_timer_module( void ) {
     } else {
         /* Initialize linked list */
         INIT_LIST_HEAD(&storage);
+
+        /* Initialize work struct */
+        INIT_WORK(&flush_work_data, flush_wq_function);
 
         /* Create timer */
         init_timer(&my_timer);
@@ -115,6 +154,9 @@ void cleanup_timer_module( void ) {
     
     /* Wait until completion of the timer function (if it's currently running) and delete timer */
     del_timer_sync(&my_timer);
+
+    /* Wait until all jobs scheduled so far have finished */
+    flush_scheduled_work();
 }
 
 module_init( init_timer_module );
