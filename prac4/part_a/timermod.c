@@ -7,6 +7,7 @@
 #include <linux/vmalloc.h>
 #include <linux/list.h>
 #include <linux/smp.h>
+#include <linux/semaphore.h>
 #include <asm-generic/uaccess.h>
 #include "cbuffer.h"
 
@@ -20,14 +21,18 @@ static cbuffer_t* cbuffer;
 DEFINE_SPINLOCK(cbuffer_sl);
 
 /* Functions to manipulate the list */
+#define MAX_ITEMS_LIST sizeof(unsigned int)
 struct list_item_t {
   unsigned int data;
   struct list_head storage_links;
 } list_item_t;
 struct list_head storage; /* Linked list to store numbers */
+struct semaphore list_sem; //Linked list semaphore "mutex"
+volatile unsigned int list_items; // Only modified at startup or inside a lock
 static int append_to_list(unsigned int elem);
-static void remove_from_list(int elem);
-static void clear_list( void );
+static int remove_from_list(int elem);
+static int clear_list( void );
+static void free_nodes(struct list_item_t** elems, unsigned int nelems);
 
 /* Functions to schedule work */
 struct timer_list my_timer;
@@ -51,38 +56,69 @@ static const struct file_operations modconfig_entry_fops = {
 };
 
 int append_to_list(unsigned int elem) {
-  struct list_item_t *new_item = (struct list_item_t *)vmalloc(sizeof(struct list_item_t));
-  new_item->data = elem;
-  list_add_tail(&new_item->storage_links, &storage);
-  return 0;
-}
-
-void remove_from_list(int elem) {
-  struct list_item_t *item = NULL;
-  struct list_head *cur_node = NULL;
-  struct list_head *aux_node = NULL;
-
-  list_for_each_safe(cur_node, aux_node, &storage) {    
-    item = list_entry(cur_node, struct list_item_t, storage_links);
-    if (item->data == elem) {
-      printk(KERN_INFO "Modtimer: Deleting node (%i)\n", item->data);
-      list_del(cur_node);
-      vfree(item);      
+    struct list_item_t *new_item = (struct list_item_t *)vmalloc(sizeof(struct list_item_t));
+    new_item->data = elem;
+    if(down_interruptible(&list_sem)) {
+        return -EINTR;
     }
-  }
+    list_add_tail(&new_item->storage_links, &storage);
+    up(&list_sem);
+    return 0;
 }
 
-void clear_list() {
-  struct list_item_t *item = NULL;
-  struct list_head *cur_node = NULL;
-  struct list_head *aux_node = NULL;
+int remove_from_list(int elem) {
+    struct list_item_t *item = NULL;
+    struct list_head *cur_node = NULL;
+    struct list_head *aux_node = NULL;
+    struct list_item_t *to_be_removed[1];
 
-  list_for_each_safe(cur_node, aux_node, &storage) {
-    printk(KERN_INFO "Modtimer: Deleting node\n");
+    if(down_interruptible(&list_sem)) {
+        return -EINTR;
+    }
+    list_for_each_safe(cur_node, aux_node, &storage) {    
     item = list_entry(cur_node, struct list_item_t, storage_links);
-    list_del(cur_node);
-    vfree(item);
-  }
+        if (item->data == elem) {
+            printk(KERN_INFO "Modtimer: Deleting node (%i)\n", item->data);
+            list_del(cur_node);
+            to_be_removed[0] = item;
+            list_items--;
+        }
+    }
+    up(&list_sem);
+
+    // Blocking -> Must be called outsde the lock
+    free_nodes(to_be_removed, 1);
+    return 0;
+}
+
+int clear_list() {
+    struct list_head *cur_node = NULL;
+    struct list_head *aux_node = NULL;
+    unsigned int num_items = 0;
+    struct list_item_t *to_be_removed[MAX_ITEMS_LIST];
+
+    if(down_interruptible(&list_sem)) {
+        return -EINTR;
+    }
+    list_for_each_safe(cur_node, aux_node, &storage) {
+        printk(KERN_INFO "Modlist: Deleting node\n");
+        to_be_removed[num_items] = list_entry(cur_node, struct list_item_t, storage_links);
+        num_items++;
+        list_del(cur_node);
+    }
+    list_items = 0;
+    up(&list_sem);
+
+    // Blocking -> Must be called outsde the lock
+    free_nodes(to_be_removed, num_items);
+    return 0;
+}
+
+void free_nodes(struct list_item_t **elems, unsigned int nelems) {
+    int i;
+    for(i = 0; i < nelems; i++) {
+        vfree(elems[i]);
+    }
 }
 
 int select_cpu() {
@@ -105,7 +141,9 @@ void flush_wq_function(struct work_struct *work) {
     while(size_cbuffer_t(cbuffer) >= sizeof(int)) {
         remove_items_cbuffer_t(cbuffer, (char *)&num_to_insert, sizeof(int));
         printk(KERN_INFO "Modtimer: Inserting elem %i into list\n", num_to_insert);
-        append_to_list(num_to_insert);
+        if (append_to_list(num_to_insert)) {
+            printk(KERN_INFO "Modtimer: Inserting into list Failed!\n");
+        }
     }
     spin_unlock_irqrestore(&cbuffer_sl, lock_flags);
 }
@@ -217,6 +255,8 @@ int init_timer_module( void ) {
 
     /* Initialize linked list */
     INIT_LIST_HEAD(&storage);
+    sema_init(&list_sem, 1);
+    list_items = 0;
 
     /* Initialize work struct */
     INIT_WORK(&flush_work_data, flush_wq_function);
@@ -235,7 +275,9 @@ int init_timer_module( void ) {
 
 void cleanup_timer_module( void ) {
     /* Clear linked list */
-    clear_list();
+    if(clear_list()) {
+        printk(KERN_INFO "Modtimer: Failed to clear list.\n");
+    }
 
     /* Destroy top half buffer */
     destroy_cbuffer_t(cbuffer);
