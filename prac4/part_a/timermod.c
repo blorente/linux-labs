@@ -55,6 +55,18 @@ static const struct file_operations modconfig_entry_fops = {
     .write = modconfig_write,
 };
 
+/* Functions for modtimer proc entry */
+#define MAX_KBUF_MODTIMER 100
+static struct proc_dir_entry *modtimer_proc_entry;
+static int modtimer_open(struct inode *inode, struct file *file);
+static int modtimer_release(struct inode *inode, struct file *file);
+static ssize_t modtimer_read(struct file *filp, char __user *buf, size_t len, loff_t *off);
+static const struct file_operations modtimer_entry_fops = {
+    //.open = modtimer_open,
+    //.release = modtimer_release,
+    .read = modtimer_read,
+};
+
 int append_to_list(unsigned int elem) {
     struct list_item_t *new_item = (struct list_item_t *)vmalloc(sizeof(struct list_item_t));
     new_item->data = elem;
@@ -234,6 +246,21 @@ ssize_t modconfig_write(struct file *filp, const char __user *buf, size_t len, l
     return len;
 }
 
+int modtimer_open(struct inode *inode, struct file *file) {
+    printk(KERN_INFO "Modtimer: /proc/modtimer open\n");
+    return 0;
+}
+
+int modtimer_release(struct inode *inode, struct file *file) {
+    printk(KERN_INFO "Modtimer: /proc/modtimer release\n");
+    return 0;
+}
+
+ssize_t modtimer_read(struct file *filp, char __user *buf, size_t len, loff_t *off) {    
+    printk(KERN_INFO "Modtimer: /proc/modtimer read\n");
+    return 0;
+}
+
 int init_timer_module( void ) {
     /* Create cbuffer for the top half */
     cbuffer = create_cbuffer_t(BUFFER_LENGTH);
@@ -249,6 +276,18 @@ int init_timer_module( void ) {
 
         /* Cleanup */
         destroy_cbuffer_t(cbuffer);
+
+        return -ENOMEM;
+    }
+
+    /* Create modtimer /proc entry */
+    modtimer_proc_entry = proc_create( "modtimer", 0666, NULL, &modtimer_entry_fops);
+    if (modtimer_proc_entry == NULL) {
+        printk(KERN_INFO "Modlist: Can't create /proc/modtimer entry\n");
+
+        /* Cleanup */
+        destroy_cbuffer_t(cbuffer);
+        remove_proc_entry("modconfig", NULL);
 
         return -ENOMEM;
     }
@@ -278,12 +317,15 @@ void cleanup_timer_module( void ) {
     if(clear_list()) {
         printk(KERN_INFO "Modtimer: Failed to clear list.\n");
     }
+    printk(KERN_INFO "Modtimer: List cleared.\n");
 
     /* Destroy top half buffer */
     destroy_cbuffer_t(cbuffer);
+    printk(KERN_INFO "Modtimer: Cbuffer destroyed.\n");
 
     /* Remove /proc entries */
     remove_proc_entry("modconfig", NULL);
+    remove_proc_entry("modtimer", NULL);
     
     /* Wait until completion of the timer function (if it's currently running) and delete timer */
     del_timer_sync(&my_timer);
