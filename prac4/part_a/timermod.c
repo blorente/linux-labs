@@ -41,7 +41,7 @@ static void fire_timer(unsigned long data);
 /* Functions for modconfig proc entry */
 #define MAX_KBUF_MODCONFIG 100
 static struct proc_dir_entry *modconfig_proc_entry;
-volatile int timer_period_ms = 500;
+volatile int timer_period_ms = 1000;
 volatile int emergency_threshold = 12;
 volatile int max_random = 100;
 static ssize_t modconfig_read(struct file *filp, char __user *buf, size_t len, loff_t *off);
@@ -156,6 +156,34 @@ ssize_t modconfig_read(struct file *filp, char __user *buf, size_t len, loff_t *
 }
 
 ssize_t modconfig_write(struct file *filp, const char __user *buf, size_t len, loff_t *off) {
+    char kbuf[MAX_KBUF_MODCONFIG];
+    int value;
+
+    if ((*off) > 0)
+      return 0;
+
+    if (len + 1 > MAX_KBUF_MODCONFIG) {
+        printk(KERN_INFO "Modtimer: Modconfig Panic! (not enough space)\n");
+        return -ENOSPC;
+    }
+
+    if (copy_from_user(&kbuf[0], buf, len)) {
+        printk(KERN_INFO "Modtimer: Modconfig Panic! (failed copy_from_user)\n");
+        return -EFAULT;
+    }
+
+    kbuf[len] = '\0'; // Add string terminator
+
+    if (sscanf(kbuf, "timer_period_ms %i", &value) == 1) {
+        timer_period_ms = value;
+    } else if (sscanf(kbuf, "emergency_threshold %i", &value) == 1) {
+        emergency_threshold = value;
+    } else if (sscanf(kbuf, "max_random %i", &value) == 1) {
+        max_random = value;
+    } else {
+        printk(KERN_INFO "Modtimer: Modconfig Panic! (unrecognized option: %s)", kbuf);
+    }
+
     return len;
 }
 
