@@ -16,6 +16,7 @@ MODULE_LICENSE("GPL");
 
 #define BUFFER_LENGTH 24
 
+volatile int cleanup_done = 0;
 static void cleanup( void );
 
 /* Cbuffer for the Top Half */
@@ -47,7 +48,7 @@ static void fire_timer(unsigned long data);
 /* Functions for modconfig proc entry */
 #define MAX_KBUF_MODCONFIG 100
 static struct proc_dir_entry *modconfig_proc_entry;
-volatile int timer_period_ms = 1000;
+volatile int timer_period_ms = 3000;
 volatile int emergency_threshold = 12;
 volatile int max_random = 100;
 static int modconfig_open(struct inode *inode, struct file *file);
@@ -64,6 +65,8 @@ static const struct file_operations modconfig_entry_fops = {
 /* Functions for modtimer proc entry */
 #define MAX_KBUF_MODTIMER 100
 volatile int opened_for_read = 0;
+volatile int reader_waiting = 0;
+struct semaphore read_sem;
 static struct proc_dir_entry *modtimer_proc_entry;
 static int modtimer_open(struct inode *inode, struct file *file);
 static int modtimer_release(struct inode *inode, struct file *file);
@@ -81,6 +84,7 @@ int append_to_list(unsigned int elem) {
         return -EINTR;
     }
     list_add_tail(&new_item->storage_links, &storage);
+    list_items++;
     up(&list_sem);
     return 0;
 }
@@ -183,6 +187,17 @@ void flush_wq_function(struct work_struct *work) {
         }
     }
     vfree(nums_to_insert);
+
+    /* Awake possible user space reader */
+    if (down_interruptible(&list_sem)) {
+        printk(KERN_INFO "Modtimer: Notifying user program failed!\n");
+        return;
+    }
+    if (reader_waiting > 0) {
+        up(&read_sem);
+        reader_waiting = 0;
+    }
+    up(&list_sem);
 }
 
 void fire_timer(unsigned long data) {
@@ -283,7 +298,32 @@ ssize_t modconfig_write(struct file *filp, const char __user *buf, size_t len, l
 
 int modtimer_open(struct inode *inode, struct file *file) {
     printk(KERN_INFO "Modtimer: /proc/modtimer open\n");
-    opened_for_read = 1;
+
+    if(down_interruptible(&list_sem)) {
+        return -EINTR;
+    }
+
+    opened_for_read = 1;    
+    
+    /* Wait while the list is empty */
+    printk(KERN_INFO "Modtimer: Waiting for list to fill...\n");
+    while(list_items == 0) {            
+        reader_waiting = 1;
+        up(&list_sem);
+        printk(KERN_INFO "Modtimer: Registering reader in queue...\n");
+        if (down_interruptible(&read_sem)) {
+            down(&list_sem);
+            reader_waiting = 0;
+            up(&list_sem);
+            return -EINTR;
+        }
+        printk(KERN_INFO "Modtimer: Checking list emptiness...\n");
+        if (down_interruptible(&list_sem))
+            return -EINTR;
+    }
+    up(&list_sem);
+
+    /* Increment module refcount */
     try_module_get(THIS_MODULE);
     return 0;
 }
@@ -301,6 +341,8 @@ ssize_t modtimer_read(struct file *filp, char __user *buf, size_t len, loff_t *o
     printk(KERN_INFO "Modtimer: /proc/modtimer read\n");
     if ((*off) > 0)
       return 0;
+
+    (*off) += len;
 
     return len;
 }
@@ -341,6 +383,9 @@ int init_timer_module( void ) {
     sema_init(&list_sem, 1);
     list_items = 0;
 
+    /* Initialize reader semaphore */
+    sema_init(&read_sem, 0);
+
     /* Initialize work struct */
     INIT_WORK(&flush_work_data, flush_wq_function);
 
@@ -357,7 +402,7 @@ int init_timer_module( void ) {
 }
 
 void cleanup_timer_module( void ) {
-    if (!opened_for_read) {
+    if (!cleanup_done) {
         cleanup();
     }
 
@@ -385,6 +430,8 @@ void cleanup( void ) {
     /* Destroy top half buffer */
     destroy_cbuffer_t(cbuffer);
     printk(KERN_INFO "Modtimer: Cbuffer destroyed.\n");
+
+    cleanup_done = 1;
 }
 
 module_init( init_timer_module );
