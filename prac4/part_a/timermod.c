@@ -144,20 +144,38 @@ void schedule_flush(int cpu_to_use) {
 }
 
 void flush_wq_function(struct work_struct *work) {
-    unsigned int num_to_insert = 0;
     unsigned long lock_flags = 0;
+    unsigned int *nums_to_insert = NULL;
+    unsigned int item_to_insert = 0;
+    unsigned int num_items = 0;
+    unsigned int i = 0;
     /* Flush the buffer into the linked list */
     printk(KERN_INFO "Modtimer: Work started\n");
-    
+
+    /* Blocking: assign items to a data structure to copy from buffer */
+    nums_to_insert = (unsigned int *)vmalloc(BUFFER_LENGTH);
+    if (nums_to_insert == NULL) {
+        printk(KERN_INFO "Modtimer: Failed to allocate insertion buffer\n");
+        return;
+    }
+
+    /* Retrieve items from buffer */
     spin_lock_irqsave(&cbuffer_sl, lock_flags);
-    while(size_cbuffer_t(cbuffer) >= sizeof(int)) {
-        remove_items_cbuffer_t(cbuffer, (char *)&num_to_insert, sizeof(int));
-        printk(KERN_INFO "Modtimer: Inserting elem %i into list\n", num_to_insert);
-        if (append_to_list(num_to_insert)) {
+    num_items = size_cbuffer_t(cbuffer) / 4; // No truncating problems
+    remove_items_cbuffer_t(cbuffer, (char *)nums_to_insert, num_items * 4);
+    spin_unlock_irqrestore(&cbuffer_sl, lock_flags);
+    
+    /* Blocking: Insert elements into linked list */
+    for (i = 0; i < num_items; i++) {
+        item_to_insert = nums_to_insert[i];
+        printk(KERN_INFO "Modtimer: Inserting elem %i into list\n", item_to_insert);
+        if (append_to_list(item_to_insert)) {
             printk(KERN_INFO "Modtimer: Inserting into list Failed!\n");
+            vfree(nums_to_insert);
+            return;
         }
     }
-    spin_unlock_irqrestore(&cbuffer_sl, lock_flags);
+    vfree(nums_to_insert);
 }
 
 void fire_timer(unsigned long data) {
@@ -258,7 +276,10 @@ int modtimer_release(struct inode *inode, struct file *file) {
 
 ssize_t modtimer_read(struct file *filp, char __user *buf, size_t len, loff_t *off) {    
     printk(KERN_INFO "Modtimer: /proc/modtimer read\n");
-    return 0;
+    if ((*off) > 0)
+      return 0;
+
+    return len;
 }
 
 int init_timer_module( void ) {
@@ -313,6 +334,14 @@ int init_timer_module( void ) {
 }
 
 void cleanup_timer_module( void ) {
+    /* Wait until completion of the timer function (if it's currently running) and delete timer */
+    del_timer_sync(&my_timer);
+    printk(KERN_INFO "Modtimer: Timer completed.\n");
+
+    /* Wait until all jobs scheduled so far have finished */
+    flush_scheduled_work();
+    printk(KERN_INFO "Modtimer: Scheduled jobs flushed.\n");
+    
     /* Clear linked list */
     if(clear_list()) {
         printk(KERN_INFO "Modtimer: Failed to clear list.\n");
@@ -326,12 +355,7 @@ void cleanup_timer_module( void ) {
     /* Remove /proc entries */
     remove_proc_entry("modconfig", NULL);
     remove_proc_entry("modtimer", NULL);
-    
-    /* Wait until completion of the timer function (if it's currently running) and delete timer */
-    del_timer_sync(&my_timer);
-
-    /* Wait until all jobs scheduled so far have finished */
-    flush_scheduled_work();
+    printk(KERN_INFO "Modtimer: Proc entries removed.\n");
 }
 
 module_init( init_timer_module );
