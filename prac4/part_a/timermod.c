@@ -35,6 +35,7 @@ volatile unsigned int list_items; // Only modified at startup or inside a lock
 static int append_to_list(unsigned int elem);
 static int remove_from_list(int elem);
 static int clear_list( void );
+static int read_list(char *buf, int num_bytes);
 static void free_nodes(struct list_item_t** elems, unsigned int nelems);
 
 /* Functions to schedule work */
@@ -63,7 +64,7 @@ static const struct file_operations modconfig_entry_fops = {
 };
 
 /* Functions for modtimer proc entry */
-#define MAX_KBUF_MODTIMER 100
+#define MAX_KBUF_MODTIMER 128
 volatile int opened_for_read = 0;
 volatile int reader_waiting = 0;
 struct semaphore read_sem;
@@ -135,6 +136,25 @@ int clear_list() {
     // Blocking -> Must be called outsde the lock
     free_nodes(to_be_removed, num_items);
     return 0;
+}
+
+int read_list(char *buf, int num_bytes) {
+    struct list_head *cur_node = NULL;
+    struct list_item_t *item;
+    char *writing_head = buf;
+
+    if(down_interruptible(&list_sem)) {
+        return -EINTR;
+    }
+
+    list_for_each(cur_node, &storage) {
+        item = list_entry(cur_node, struct list_item_t, storage_links);
+        printk(KERN_INFO "Modlist: Reading node: %i\n", item->data);
+        writing_head += sprintf(writing_head, "%i\n", item->data);
+    }
+    up(&list_sem);
+
+    return (writing_head - buf);
 }
 
 void free_nodes(struct list_item_t **elems, unsigned int nelems) {
@@ -299,6 +319,11 @@ ssize_t modconfig_write(struct file *filp, const char __user *buf, size_t len, l
 int modtimer_open(struct inode *inode, struct file *file) {
     printk(KERN_INFO "Modtimer: /proc/modtimer open\n");
 
+    /* Do not allow multiple processes to enter */
+    if (opened_for_read) {
+        return -EINVAL;
+    }
+
     if(down_interruptible(&list_sem)) {
         return -EINTR;
     }
@@ -337,14 +362,40 @@ int modtimer_release(struct inode *inode, struct file *file) {
     return 0;
 }
 
-ssize_t modtimer_read(struct file *filp, char __user *buf, size_t len, loff_t *off) {    
+ssize_t modtimer_read(struct file *filp, char __user *buf, size_t len, loff_t *off) {
+    char kbuf[MAX_KBUF_MODTIMER];  
+    int nr_bytes = len > MAX_KBUF_MODTIMER ? MAX_KBUF_MODTIMER : len;
+
     printk(KERN_INFO "Modtimer: /proc/modtimer read\n");
-    if ((*off) > 0)
-      return 0;
 
-    (*off) += len;
+    if(down_interruptible(&list_sem)) {
+        return -EINTR;
+    }
+    /* Wait while the list is empty */
+    printk(KERN_INFO "Modtimer: Waiting for list to fill...\n");
+    while(list_items == 0) {            
+        reader_waiting = 1;
+        up(&list_sem);
+        printk(KERN_INFO "Modtimer: Registering reader in queue...\n");
+        if (down_interruptible(&read_sem)) {
+            down(&list_sem);
+            reader_waiting = 0;
+            up(&list_sem);
+            return -EINTR;
+        }
+        printk(KERN_INFO "Modtimer: Checking list emptiness...\n");
+        if (down_interruptible(&list_sem))
+            return -EINTR;
+    }
+    up(&list_sem);
 
-    return len;
+    /* Read from the list */
+    nr_bytes = read_list(kbuf, nr_bytes);
+    if (copy_to_user(buf, kbuf, nr_bytes))
+        return -EINVAL;
+    clear_list();
+
+    return nr_bytes;
 }
 
 int init_timer_module( void ) {
