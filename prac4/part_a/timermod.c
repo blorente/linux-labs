@@ -16,6 +16,8 @@ MODULE_LICENSE("GPL");
 
 #define BUFFER_LENGTH 24
 
+static void cleanup( void );
+
 /* Cbuffer for the Top Half */
 static cbuffer_t* cbuffer;
 DEFINE_SPINLOCK(cbuffer_sl);
@@ -48,22 +50,27 @@ static struct proc_dir_entry *modconfig_proc_entry;
 volatile int timer_period_ms = 1000;
 volatile int emergency_threshold = 12;
 volatile int max_random = 100;
+static int modconfig_open(struct inode *inode, struct file *file);
+static int modconfig_release(struct inode *inode, struct file *file);
 static ssize_t modconfig_read(struct file *filp, char __user *buf, size_t len, loff_t *off);
 static ssize_t modconfig_write(struct file *filp, const char __user *buf, size_t len, loff_t *off);
 static const struct file_operations modconfig_entry_fops = {
+    .open = modconfig_open,
+    .release = modconfig_release,
     .read = modconfig_read,
     .write = modconfig_write,
 };
 
 /* Functions for modtimer proc entry */
 #define MAX_KBUF_MODTIMER 100
+volatile int opened_for_read = 0;
 static struct proc_dir_entry *modtimer_proc_entry;
 static int modtimer_open(struct inode *inode, struct file *file);
 static int modtimer_release(struct inode *inode, struct file *file);
 static ssize_t modtimer_read(struct file *filp, char __user *buf, size_t len, loff_t *off);
 static const struct file_operations modtimer_entry_fops = {
-    //.open = modtimer_open,
-    //.release = modtimer_release,
+    .open = modtimer_open,
+    .release = modtimer_release,
     .read = modtimer_read,
 };
 
@@ -203,6 +210,16 @@ void fire_timer(unsigned long data) {
     mod_timer( &(my_timer), jiffies + timer_period_ms); 
 }
 
+int modconfig_open(struct inode *inode, struct file *file) {
+    try_module_get(THIS_MODULE);
+    return 0;
+}
+
+int modconfig_release(struct inode *inode, struct file *file) {
+    module_put(THIS_MODULE);
+    return 0;
+}
+
 ssize_t modconfig_read(struct file *filp, char __user *buf, size_t len, loff_t *off) {
     char kbuf[MAX_KBUF_MODCONFIG];
     char *result;
@@ -266,11 +283,17 @@ ssize_t modconfig_write(struct file *filp, const char __user *buf, size_t len, l
 
 int modtimer_open(struct inode *inode, struct file *file) {
     printk(KERN_INFO "Modtimer: /proc/modtimer open\n");
+    opened_for_read = 1;
+    try_module_get(THIS_MODULE);
     return 0;
 }
 
 int modtimer_release(struct inode *inode, struct file *file) {
     printk(KERN_INFO "Modtimer: /proc/modtimer release\n");
+    cleanup();
+
+    /* Decrement module reference count */
+    module_put(THIS_MODULE);
     return 0;
 }
 
@@ -334,6 +357,17 @@ int init_timer_module( void ) {
 }
 
 void cleanup_timer_module( void ) {
+    if (!opened_for_read) {
+        cleanup();
+    }
+
+    /* Remove /proc entries */
+    remove_proc_entry("modconfig", NULL);
+    remove_proc_entry("modtimer", NULL);
+    printk(KERN_INFO "Modtimer: Proc entries removed.\n");
+}
+
+void cleanup( void ) {
     /* Wait until completion of the timer function (if it's currently running) and delete timer */
     del_timer_sync(&my_timer);
     printk(KERN_INFO "Modtimer: Timer completed.\n");
@@ -351,11 +385,6 @@ void cleanup_timer_module( void ) {
     /* Destroy top half buffer */
     destroy_cbuffer_t(cbuffer);
     printk(KERN_INFO "Modtimer: Cbuffer destroyed.\n");
-
-    /* Remove /proc entries */
-    remove_proc_entry("modconfig", NULL);
-    remove_proc_entry("modtimer", NULL);
-    printk(KERN_INFO "Modtimer: Proc entries removed.\n");
 }
 
 module_init( init_timer_module );
