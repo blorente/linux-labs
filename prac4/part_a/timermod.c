@@ -324,6 +324,18 @@ int modtimer_open(struct inode *inode, struct file *file) {
         return -EINVAL;
     }
 
+    /* Increment module refcount */
+    try_module_get(THIS_MODULE);
+
+    /* Create timer */
+    init_timer(&my_timer);
+    /* Initialize field */
+    my_timer.data=0;
+    my_timer.function=fire_timer;
+    my_timer.expires=jiffies + timer_period_ms;  /* Activate it one second from now */
+    /* Activate the timer for the first time */
+    add_timer(&my_timer);
+
     if(down_interruptible(&list_sem)) {
         return -EINTR;
     }
@@ -348,8 +360,6 @@ int modtimer_open(struct inode *inode, struct file *file) {
     }
     up(&list_sem);
 
-    /* Increment module refcount */
-    try_module_get(THIS_MODULE);
     return 0;
 }
 
@@ -439,15 +449,6 @@ int init_timer_module( void ) {
 
     /* Initialize work struct */
     INIT_WORK(&flush_work_data, flush_wq_function);
-
-    /* Create timer */
-    init_timer(&my_timer);
-    /* Initialize field */
-    my_timer.data=0;
-    my_timer.function=fire_timer;
-    my_timer.expires=jiffies + timer_period_ms;  /* Activate it one second from now */
-    /* Activate the timer for the first time */
-    add_timer(&my_timer);
     
     return 0;
 }
