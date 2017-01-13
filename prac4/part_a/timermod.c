@@ -16,8 +16,8 @@ MODULE_LICENSE("GPL");
 
 #define BUFFER_LENGTH 24
 
-volatile int cleanup_done = 0;
-static void cleanup( void );
+volatile int clear_on_close_done = 0;
+static void clear_on_close( void );
 
 /* Cbuffer for the Top Half */
 static cbuffer_t* cbuffer;
@@ -176,24 +176,17 @@ void schedule_flush(int cpu_to_use) {
 
 void flush_wq_function(struct work_struct *work) {
     unsigned long lock_flags = 0;
-    unsigned int *nums_to_insert = NULL;
     unsigned int item_to_insert = 0;
     unsigned int num_items = 0;
     unsigned int i = 0;
+    unsigned int nums_to_insert[BUFFER_LENGTH];
     /* Flush the buffer into the linked list */
     printk(KERN_INFO "Modtimer: Work started\n");
-
-    /* Blocking: assign items to a data structure to copy from buffer */
-    nums_to_insert = (unsigned int *)vmalloc(BUFFER_LENGTH);
-    if (nums_to_insert == NULL) {
-        printk(KERN_INFO "Modtimer: Failed to allocate insertion buffer\n");
-        return;
-    }
 
     /* Retrieve items from buffer */
     spin_lock_irqsave(&cbuffer_sl, lock_flags);
     num_items = size_cbuffer_t(cbuffer) / 4; // No truncating problems
-    remove_items_cbuffer_t(cbuffer, (char *)nums_to_insert, num_items * 4);
+    remove_items_cbuffer_t(cbuffer, (char *)&nums_to_insert[0], num_items * 4);
     spin_unlock_irqrestore(&cbuffer_sl, lock_flags);
     
     /* Blocking: Insert elements into linked list */
@@ -202,17 +195,12 @@ void flush_wq_function(struct work_struct *work) {
         printk(KERN_INFO "Modtimer: Inserting elem %i into list\n", item_to_insert);
         if (append_to_list(item_to_insert)) {
             printk(KERN_INFO "Modtimer: Inserting into list Failed!\n");
-            vfree(nums_to_insert);
             return;
         }
     }
-    vfree(nums_to_insert);
 
     /* Awake possible user space reader */
-    if (down_interruptible(&list_sem)) {
-        printk(KERN_INFO "Modtimer: Notifying user program failed!\n");
-        return;
-    }
+    down(&list_sem);
     if (reader_waiting > 0) {
         up(&read_sem);
         reader_waiting = 0;
@@ -365,7 +353,7 @@ int modtimer_open(struct inode *inode, struct file *file) {
 
 int modtimer_release(struct inode *inode, struct file *file) {
     printk(KERN_INFO "Modtimer: /proc/modtimer release\n");
-    cleanup();
+    clear_on_close();
 
     /* Decrement module reference count */
     module_put(THIS_MODULE);
@@ -454,9 +442,12 @@ int init_timer_module( void ) {
 }
 
 void cleanup_timer_module( void ) {
-    if (!cleanup_done) {
-        cleanup();
+    if (!clear_on_close_done) {
+        clear_on_close();
     }
+
+    destroy_cbuffer_t(cbuffer);
+    printk(KERN_INFO "Modtimer: Cbuffer destroyed.\n");
 
     /* Remove /proc entries */
     remove_proc_entry("modconfig", NULL);
@@ -464,7 +455,7 @@ void cleanup_timer_module( void ) {
     printk(KERN_INFO "Modtimer: Proc entries removed.\n");
 }
 
-void cleanup( void ) {
+void clear_on_close( void ) {
     /* Wait until completion of the timer function (if it's currently running) and delete timer */
     del_timer_sync(&my_timer);
     printk(KERN_INFO "Modtimer: Timer completed.\n");
@@ -479,11 +470,11 @@ void cleanup( void ) {
     }
     printk(KERN_INFO "Modtimer: List cleared.\n");
 
-    /* Destroy top half buffer */
-    destroy_cbuffer_t(cbuffer);
-    printk(KERN_INFO "Modtimer: Cbuffer destroyed.\n");
+    /* Clear top half buffer */
+    clear_cbuffer_t(cbuffer);
+    printk(KERN_INFO "Modtimer: Cbuffer cleared.\n");
 
-    cleanup_done = 1;
+    clear_on_close_done = 1;
 }
 
 module_init( init_timer_module );
