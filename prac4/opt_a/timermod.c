@@ -29,18 +29,21 @@ struct list_item_t {
   unsigned int data;
   struct list_head storage_links;
 } list_item_t;
-struct semaphore list_sem_odd; //Linked list semaphore "mutex"
-struct list_head storage_odd;
-unsigned int list_items_odd; // Only modified at startup or inside a lock
 
-struct list_head storage_even; /* Linked list to store numbers */
-struct semaphore list_sem_even; // Also used as a mutex for reader access for now
-unsigned int list_items_even;
+// List for even numbers
+struct list_head even_storage;
+struct semaphore even_sem;
+unsigned int even_items;
 
-static int append_to_list(unsigned int elem, struct semaphore *lock, struct list_head *storage, unsigned int *list_items);
-static int remove_from_list(int elem, struct semaphore *lock, struct list_head *storage, unsigned int *list_items);
-static int clear_list(struct semaphore *lock, struct list_head *storage, unsigned int *list_items);
-static int read_list(char *buf, int num_bytes, struct semaphore *lock, struct list_head *storage);
+// List for odd numbers
+struct list_head odd_storage; /* Linked list to store numbers */
+struct semaphore odd_sem; //Linked list semaphore "mutex"
+unsigned int odd_items; // Only modified at startup or inside a lock
+
+static int append_to_list(unsigned int elem, struct list_head *storage, struct semaphore *list_sem, unsigned int *list_items);
+static int remove_from_list(int elem, struct list_head *storage, struct semaphore *list_sem, unsigned int *list_items);
+static int clear_list( struct list_head *storage, struct semaphore *list_sem, unsigned int *list_items );
+static int read_list(char *buf, int num_bytes, struct list_head *storage, struct semaphore *list_sem);
 static void free_nodes(struct list_item_t** elems, unsigned int nelems);
 
 /* Functions to schedule work */
@@ -56,7 +59,7 @@ static void fire_timer(unsigned long data);
 static struct proc_dir_entry *modconfig_proc_entry;
 volatile int timer_period_ms = 500;
 volatile int emergency_threshold = 24;
-volatile int max_random = 3;
+volatile int max_random = 2;
 static int modconfig_open(struct inode *inode, struct file *file);
 static int modconfig_release(struct inode *inode, struct file *file);
 static ssize_t modconfig_read(struct file *filp, char __user *buf, size_t len, loff_t *off);
@@ -83,25 +86,25 @@ static const struct file_operations modtimer_entry_fops = {
     .read = modtimer_read,
 };
 
-int append_to_list(unsigned int elem, struct semaphore *lock, struct list_head *storage, unsigned int *list_items) {
+int append_to_list(unsigned int elem, struct list_head *storage, struct semaphore *list_sem, unsigned int *list_items) {
     struct list_item_t *new_item = (struct list_item_t *)vmalloc(sizeof(struct list_item_t));
     new_item->data = elem;
-    if(down_interruptible(lock)) {
+    if(down_interruptible(list_sem)) {
         return -EINTR;
     }
     list_add_tail(&new_item->storage_links, storage);
     (*list_items)++;
-    up(lock);
+    up(list_sem);
     return 0;
 }
 
-int remove_from_list(int elem, struct semaphore *lock, struct list_head *storage, unsigned int *list_items) {
+int remove_from_list(int elem, struct list_head *storage, struct semaphore *list_sem, unsigned int *list_items) {
     struct list_item_t *item = NULL;
     struct list_head *cur_node = NULL;
     struct list_head *aux_node = NULL;
     struct list_item_t *to_be_removed[1];
 
-    if(down_interruptible(lock)) {
+    if(down_interruptible(list_sem)) {
         return -EINTR;
     }
     list_for_each_safe(cur_node, aux_node, storage) {    
@@ -113,20 +116,20 @@ int remove_from_list(int elem, struct semaphore *lock, struct list_head *storage
             (*list_items)--;
         }
     }
-    up(lock);
+    up(list_sem);
 
     // Blocking -> Must be called outsde the lock
     free_nodes(to_be_removed, 1);
     return 0;
 }
 
-int clear_list(struct semaphore *lock, struct list_head *storage, unsigned int *list_items) {
+int clear_list(struct list_head *storage, struct semaphore *list_sem, unsigned int *list_items) {
     struct list_head *cur_node = NULL;
     struct list_head *aux_node = NULL;
     unsigned int num_items = 0;
     struct list_item_t *to_be_removed[MAX_ITEMS_LIST];
 
-    if(down_interruptible(lock)) {
+    if(down_interruptible(list_sem)) {
         return -EINTR;
     }
     list_for_each_safe(cur_node, aux_node, storage) {
@@ -136,19 +139,19 @@ int clear_list(struct semaphore *lock, struct list_head *storage, unsigned int *
         list_del(cur_node);
     }
     (*list_items) = 0;
-    up(lock);
+    up(list_sem);
 
     // Blocking -> Must be called outsde the lock
     free_nodes(to_be_removed, num_items);
     return 0;
 }
 
-int read_list(char *buf, int num_bytes, struct semaphore *lock, struct list_head *storage) {
+int read_list(char *buf, int num_bytes, struct list_head *storage, struct semaphore *list_sem) {
     struct list_head *cur_node = NULL;
     struct list_item_t *item;
     char *writing_head = buf;
 
-    if(down_interruptible(lock)) {
+    if(down_interruptible(list_sem)) {
         return -EINTR;
     }
 
@@ -157,7 +160,7 @@ int read_list(char *buf, int num_bytes, struct semaphore *lock, struct list_head
         printk(KERN_INFO "Modlist: Reading node: %i\n", item->data);
         writing_head += sprintf(writing_head, "%i\n", item->data);
     }
-    up(lock);
+    up(list_sem);
 
     return (writing_head - buf);
 }
@@ -197,27 +200,28 @@ void flush_wq_function(struct work_struct *work) {
     /* Blocking: Insert elements into linked list */
     for (i = 0; i < num_items; i++) {
         item_to_insert = nums_to_insert[i];
-        printk(KERN_INFO "Modtimer: Inserting elem %i into list\n", item_to_insert);
-        if (item_to_insert % 2 == 0) {            
-            if (append_to_list(item_to_insert, &list_sem_even, &storage_even, &list_items_even)) {
-                printk(KERN_INFO "Modtimer: Inserting into list Failed!\n");
+        if (item_to_insert % 2 == 0) {
+            printk(KERN_INFO "Modtimer: Inserting elem %i into even list\n", item_to_insert);
+            if (append_to_list(item_to_insert, &even_storage, &even_sem, &even_items)) {
+                printk(KERN_INFO "Modtimer: Inserting into even list Failed!\n");
                 return;
             }
         } else {
-             if (append_to_list(item_to_insert, &list_sem_odd, &storage_odd, &list_items_odd)) {
-                printk(KERN_INFO "Modtimer: Inserting into list Failed!\n");
+            printk(KERN_INFO "Modtimer: Inserting elem %i into odd list\n", item_to_insert);
+            if (append_to_list(item_to_insert, &odd_storage, &odd_sem, &odd_items)) {
+                printk(KERN_INFO "Modtimer: Inserting into odd list Failed!\n");
                 return;
             }
         }
     }
 
     /* Awake possible user space reader */
-    down(&list_sem_even);
+    down(&even_sem);
     if (reader_waiting > 0) {
         up(&read_sem);
         reader_waiting = 0;
     }
-    up(&list_sem_even);
+    up(&even_sem);
 }
 
 void fire_timer(unsigned long data) {
@@ -336,29 +340,7 @@ int modtimer_open(struct inode *inode, struct file *file) {
     /* Activate the timer for the first time */
     add_timer(&my_timer);
 
-    if(down_interruptible(&list_sem_even)) {
-        return -EINTR;
-    }
-
-    opened_for_read = 1;    
-    
-    /* Wait while the list is empty */
-    printk(KERN_INFO "Modtimer: Waiting for list to fill...\n");
-    while(list_items_even == 0 || list_items_odd == 0) {            
-        reader_waiting = 1;
-        up(&list_sem_even);
-        printk(KERN_INFO "Modtimer: Registering reader in queue...\n");
-        if (down_interruptible(&read_sem)) {
-            down(&list_sem);
-            reader_waiting = 0;
-            up(&list_sem);
-            return -EINTR;
-        }
-        printk(KERN_INFO "Modtimer: Checking list emptiness...\n");
-        if (down_interruptible(&list_sem_even))
-            return -EINTR;
-    }
-    up(&list_sem_even);
+    opened_for_read = 1;
 
     return 0;
 }
@@ -378,39 +360,32 @@ ssize_t modtimer_read(struct file *filp, char __user *buf, size_t len, loff_t *o
 
     printk(KERN_INFO "Modtimer: /proc/modtimer read\n");
 
-    if(down_interruptible(&list_sem)) {
+    if(down_interruptible(&even_sem)) {
         return -EINTR;
     }
     /* Wait while the list is empty */
     printk(KERN_INFO "Modtimer: Waiting for list to fill...\n");
-    while(list_items == 0) {            
+    while(even_items == 0) {            
         reader_waiting = 1;
-        up(&list_sem);
+        up(&even_sem);
         printk(KERN_INFO "Modtimer: Registering reader in queue...\n");
         if (down_interruptible(&read_sem)) {
-            down(&list_sem);
+            down(&even_sem);
             reader_waiting = 0;
-            up(&list_sem);
+            up(&even_sem);
             return -EINTR;
         }
         printk(KERN_INFO "Modtimer: Checking list emptiness...\n");
-        if (down_interruptible(&list_sem))
+        if (down_interruptible(&even_sem))
             return -EINTR;
     }
-    up(&list_sem);
+    up(&even_sem);
 
     /* Read from the list */
-
-    // For now, we just dump both lists one after the other
-    nr_bytes = read_list(kbuf, nr_bytes, &list_sem_even, &storage_even, &list_items_even);
+    nr_bytes = read_list(kbuf, nr_bytes, &even_storage, &even_sem);
     if (copy_to_user(buf, kbuf, nr_bytes))
         return -EINVAL;
-    clear_list(&list_sem_even, &storage_even, &list_items_even);
-
-    nr_bytes += read_list(kbuf, nr_bytes, &list_sem_odd, &storage_odd, &list_items_odd);
-    if (copy_to_user(buf, kbuf, nr_bytes))
-        return -EINVAL;
-    clear_list(&list_sem_odd, &storage_odd, &list_items_odd);
+    clear_list(&even_storage, &even_sem, &even_items);
 
     return nr_bytes;
 }
@@ -446,10 +421,15 @@ int init_timer_module( void ) {
         return -ENOMEM;
     }
 
-    /* Initialize linked list */
-    INIT_LIST_HEAD(&storage);
-    sema_init(&list_sem, 1);
-    list_items = 0;
+    /* Initialize even linked list */
+    INIT_LIST_HEAD(&even_storage);
+    sema_init(&even_sem, 1);
+    even_items = 0;
+    
+    /* Initialize odd linked list */
+    INIT_LIST_HEAD(&odd_storage);
+    sema_init(&odd_sem, 1);
+    odd_items = 0;
 
     /* Initialize reader semaphore */
     sema_init(&read_sem, 0);
@@ -483,18 +463,17 @@ void clear_on_close( void ) {
     flush_scheduled_work();
     printk(KERN_INFO "Modtimer: Scheduled jobs flushed.\n");
     
-    /* Clear linked list */
-
-    // FOR NOW, CLEAR BOTH
-    if(clear_list(&list_sem_even, &storage_even, &list_items_even)) {
+    /* Clear even linked list */
+    if(clear_list(&even_storage, &even_sem, &even_items)) {
         printk(KERN_INFO "Modtimer: Failed to clear even list.\n");
     }
-    printk(KERN_INFO "Modtimer: Even List cleared.\n");
+    printk(KERN_INFO "Modtimer: Even list cleared.\n");
 
-    if(clear_list(&list_sem_odd, &storage_odd, &list_items_odd)) {
+    /* Clear odd linked list */
+    if(clear_list(&odd_storage, &odd_sem, &odd_items)) {
         printk(KERN_INFO "Modtimer: Failed to clear odd list.\n");
     }
-    printk(KERN_INFO "Modtimer: Odd List cleared.\n");
+    printk(KERN_INFO "Modtimer: Odd list cleared.\n");
 
     /* Clear top half buffer */
     clear_cbuffer_t(cbuffer);
