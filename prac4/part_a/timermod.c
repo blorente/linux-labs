@@ -324,29 +324,7 @@ int modtimer_open(struct inode *inode, struct file *file) {
     /* Activate the timer for the first time */
     add_timer(&my_timer);
 
-    if(down_interruptible(&list_sem)) {
-        return -EINTR;
-    }
-
-    opened_for_read = 1;    
-    
-    /* Wait while the list is empty */
-    printk(KERN_INFO "Modtimer: Waiting for list to fill...\n");
-    while(list_items == 0) {            
-        reader_waiting = 1;
-        up(&list_sem);
-        printk(KERN_INFO "Modtimer: Registering reader in queue...\n");
-        if (down_interruptible(&read_sem)) {
-            down(&list_sem);
-            reader_waiting = 0;
-            up(&list_sem);
-            return -EINTR;
-        }
-        printk(KERN_INFO "Modtimer: Checking list emptiness...\n");
-        if (down_interruptible(&list_sem))
-            return -EINTR;
-    }
-    up(&list_sem);
+    opened_for_read = 1;
 
     return 0;
 }
