@@ -32,3 +32,4 @@ typedef struct {
 } fifo_data_t;
 
 static int init_fifo(fifo_data_t *fifo, char * name);
+static void cleanup_fifos_until(fifo_data_t *fifos, int num);

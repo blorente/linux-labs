@@ -310,6 +310,15 @@ int init_fifo(fifo_data_t *fifo, char * name) {
 	return ret;
 }
 
+void cleanup_fifos_until(fifo_data_t *fifos, int num_to_clean) {
+	int fifo;
+	for (fifo = 0; fifo < num_to_clean; fifo++) {
+		printk(KERN_INFO "fifoproc: Removing entry %s\n", fifo_list[fifo].name);
+		destroy_cbuffer_t(fifo_list[fifo].cbuffer);
+		remove_proc_entry(fifo_list[fifo].name, NULL);
+	}
+}
+
 int init_fifoproc_module( void ) {
 	int ret = 0;
 	int fifo = 0;
@@ -320,24 +329,20 @@ int init_fifoproc_module( void ) {
 		char name[FIFO_NAME_MAX];
 		sprintf(name, "fifo%i", fifo);
 		ret = init_fifo(&(fifo_list[fifo]), name);
+		if (ret != 0) {
+			printk(KERN_INFO "fifoproc: An error ocurred, deleting entries prior to %s\n", name);	
+			cleanup_fifos_until(fifo_list, fifo);
+			vfree(fifo_list);
+			return ret;
+		}
 	}
-
-	if (ret == 0) {
-		printk(KERN_INFO "fifoproc: Module loaded\n");
-	}
+	printk(KERN_INFO "fifoproc: Module loaded\n");	
 
 	return ret;
 }
 
-
 void exit_fifoproc_module( void ) {
-	int fifo = 0;
-	for (fifo = 0; fifo < FIFOS_TO_CREATE; fifo++) {
-		printk(KERN_INFO "fifoproc: Removing entry %s\n", fifo_list[fifo].name);
-		destroy_cbuffer_t(fifo_list[fifo].cbuffer);
-		remove_proc_entry(fifo_list[fifo].name, NULL);
-	}
-	
+	cleanup_fifos_until(fifo_list, FIFOS_TO_CREATE);	
 	vfree(fifo_list);
 
 	printk(KERN_INFO "fifoproc: Module unloaded.\n");
