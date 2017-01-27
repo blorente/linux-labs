@@ -1,8 +1,5 @@
 #include "fifoproc.h"
 
-static fifo_data_t *fifo_list;
-static int fifo_num = FIFOS_TO_CREATE;
-
 static int fifoproc_open(struct inode *inode, struct file *file) {
 
 	fifo_data_t *fifo_data = (fifo_data_t*)PDE_DATA(file->f_inode);
@@ -323,9 +320,11 @@ int init_fifoproc_module( void ) {
 	int ret = 0;
 	int fifo = 0;
 
-	fifo_list = (fifo_data_t *)vmalloc(sizeof(fifo_data_t) * FIFOS_TO_CREATE);
+	printk(KERN_INFO "fifoproc: Creating %i fifo entries\n", fifo_num);
 
-	for(fifo = 0; fifo < FIFOS_TO_CREATE; fifo++) {
+	fifo_list = (fifo_data_t *)vmalloc(sizeof(fifo_data_t) * fifo_num);
+
+	for(fifo = 0; fifo < fifo_num; fifo++) {
 		char name[FIFO_NAME_MAX];
 		sprintf(name, "fifo%i", fifo);
 		ret = init_fifo(&(fifo_list[fifo]), name);
@@ -342,7 +341,7 @@ int init_fifoproc_module( void ) {
 }
 
 void exit_fifoproc_module( void ) {
-	cleanup_fifos_until(fifo_list, FIFOS_TO_CREATE);	
+	cleanup_fifos_until(fifo_list, fifo_num);	
 	vfree(fifo_list);
 
 	printk(KERN_INFO "fifoproc: Module unloaded.\n");

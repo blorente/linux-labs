@@ -3,20 +3,24 @@
 #include <linux/proc_fs.h>
 #include <linux/string.h>
 #include <linux/vmalloc.h>
+#include <linux/moduleparam.h>
+#include <linux/init.h>
+#include <linux/semaphore.h>
+#include <linux/stat.h>
 #include <asm-generic/uaccess.h>
 #include <asm-generic/errno.h>
-#include <linux/semaphore.h>
+
 #include "cbuffer.h"
 
 MODULE_LICENSE("GPL");
+/* Based on code from Juan Carlos Saez */
+MODULE_AUTHOR("Borja Lorente Escobar");
 
 #define BUFFER_LENGTH 50
 #define MAX_CHARS_KBUF 40
-
 // Since we control the name length, it's unlikely to create a bigger name
 #define FIFO_NAME_MAX 50
-
-#define FIFOS_TO_CREATE 2
+#define DEFAULT_FIFOS 1
 
 typedef struct {
 	struct proc_dir_entry *proc_entry;
@@ -31,5 +35,10 @@ typedef struct {
 	cbuffer_t* cbuffer;
 } fifo_data_t;
 
-static int init_fifo(fifo_data_t *fifo, char * name);
+static fifo_data_t *fifo_list;
+static int fifo_num = DEFAULT_FIFOS;
+
+module_param(fifo_num, int, 0000);
+
+static int init_fifo(fifo_data_t *fifo, char *name);
 static void cleanup_fifos_until(fifo_data_t *fifos, int num);
