@@ -15,6 +15,7 @@ MODULE_LICENSE("GPL");
 
 typedef struct {
 	struct proc_dir_entry *proc_entry;
+	char * name;
 	struct semaphore sem_mutex; //mutex mtx
 	struct semaphore sem_prod;
 	struct semaphore sem_cons;
@@ -24,3 +25,5 @@ typedef struct {
 	int nr_cons_waiting;
 	cbuffer_t* cbuffer;
 } fifo_data_t;
+
+static int init_fifo(fifo_data_t *fifo, char * name);

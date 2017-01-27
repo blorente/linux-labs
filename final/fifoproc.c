@@ -281,30 +281,43 @@ static const struct file_operations proc_entry_fops = {
     .write = fifoproc_write,    
 };
 
-int init_fifoproc_module( void ) {
+int init_fifo(fifo_data_t *fifo, char * name) {
 	int ret = 0;
-	
 	struct proc_dir_entry *entry = NULL;
 
-	sema_init(&(fifo_data_base.sem_mutex), 1);
-	sema_init(&(fifo_data_base.sem_prod), 0);
-	sema_init(&(fifo_data_base.sem_cons), 0);
+	sema_init(&(fifo->sem_mutex), 1);
+	sema_init(&(fifo->sem_prod), 0);
+	sema_init(&(fifo->sem_cons), 0);
 
-	fifo_data_base.cbuffer = create_cbuffer_t(BUFFER_LENGTH);
-	if (fifo_data_base.cbuffer == NULL) {
+	fifo->cbuffer = create_cbuffer_t(BUFFER_LENGTH);
+	if (fifo->cbuffer == NULL) {
 		ret = -ENOMEM;
-		printk(KERN_INFO "fifoproc: Cannot allocate cbuffer\n");
+		printk(KERN_INFO "fifoproc: Cannot allocate cbuffer for fifo %s\n", name);
 	} else {
-		entry = proc_create_data("fifoproc", 0666, NULL, &proc_entry_fops, &fifo_data_base);
+		entry = proc_create_data(name, 0666, NULL, &proc_entry_fops, fifo);
 		if (entry == NULL) {
 			ret = -ENOMEM;
-			destroy_cbuffer_t(fifo_data_base.cbuffer);
+			destroy_cbuffer_t(fifo->cbuffer);
 			printk(KERN_INFO "fifoproc: Can't create /proc entry\n");
 		} else {
-			fifo_data_base.proc_entry = entry;
-			printk(KERN_INFO "fifoproc: Module loaded\n");
+			fifo->proc_entry = entry;
+			fifo->name = name;			
+			printk(KERN_INFO "fifoproc: Entry %s created succesfully\n", fifo->name);
 		}
 	}
+
+	return ret;
+}
+
+int init_fifoproc_module( void ) {
+	int ret = 0;
+
+	ret = init_fifo(&fifo_data_base, "fifoproc");
+
+	if (ret == 0) {
+		printk(KERN_INFO "fifoproc: Module loaded\n");
+	}
+
 	return ret;
 }
 
