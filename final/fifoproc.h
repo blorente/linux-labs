@@ -13,9 +13,14 @@ MODULE_LICENSE("GPL");
 #define BUFFER_LENGTH 50
 #define MAX_CHARS_KBUF 40
 
+// Since we control the name length, it's unlikely to create a bigger name
+#define FIFO_NAME_MAX 50
+
+#define FIFOS_TO_CREATE 2
+
 typedef struct {
 	struct proc_dir_entry *proc_entry;
-	char * name;
+	char name[FIFO_NAME_MAX];
 	struct semaphore sem_mutex; //mutex mtx
 	struct semaphore sem_prod;
 	struct semaphore sem_cons;

@@ -1,6 +1,7 @@
 #include "fifoproc.h"
 
-static fifo_data_t fifo_data_base;
+static fifo_data_t *fifo_list;
+static int fifo_num = FIFOS_TO_CREATE;
 
 static int fifoproc_open(struct inode *inode, struct file *file) {
 
@@ -301,7 +302,7 @@ int init_fifo(fifo_data_t *fifo, char * name) {
 			printk(KERN_INFO "fifoproc: Can't create /proc entry\n");
 		} else {
 			fifo->proc_entry = entry;
-			fifo->name = name;			
+			strcpy(fifo->name, name);
 			printk(KERN_INFO "fifoproc: Entry %s created succesfully\n", fifo->name);
 		}
 	}
@@ -311,8 +312,15 @@ int init_fifo(fifo_data_t *fifo, char * name) {
 
 int init_fifoproc_module( void ) {
 	int ret = 0;
+	int fifo = 0;
 
-	ret = init_fifo(&fifo_data_base, "fifoproc");
+	fifo_list = (fifo_data_t *)vmalloc(sizeof(fifo_data_t) * FIFOS_TO_CREATE);
+
+	for(fifo = 0; fifo < FIFOS_TO_CREATE; fifo++) {
+		char name[FIFO_NAME_MAX];
+		sprintf(name, "fifo%i", fifo);
+		ret = init_fifo(&(fifo_list[fifo]), name);
+	}
 
 	if (ret == 0) {
 		printk(KERN_INFO "fifoproc: Module loaded\n");
@@ -323,8 +331,15 @@ int init_fifoproc_module( void ) {
 
 
 void exit_fifoproc_module( void ) {
-	destroy_cbuffer_t(fifo_data_base.cbuffer);
-	remove_proc_entry("fifoproc", NULL);
+	int fifo = 0;
+	for (fifo = 0; fifo < FIFOS_TO_CREATE; fifo++) {
+		printk(KERN_INFO "fifoproc: Removing entry %s\n", fifo_list[fifo].name);
+		destroy_cbuffer_t(fifo_list[fifo].cbuffer);
+		remove_proc_entry(fifo_list[fifo].name, NULL);
+	}
+	
+	vfree(fifo_list);
+
 	printk(KERN_INFO "fifoproc: Module unloaded.\n");
 }
 
