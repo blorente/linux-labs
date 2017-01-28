@@ -185,6 +185,10 @@ static ssize_t fifoproc_write(struct file *filp, const char __user *buf, size_t 
 		}	
 	}
 
+	if (fifo_data->cons_count == 0) {
+		return -EPIPE;
+	}
+
 	/* 3.- Producir */
 	printk(KERN_INFO "fifoproc - WRITE: Inserting into buffer...\n");
 	insert_items_cbuffer_t(fifo_data->cbuffer, kbuffer, len);
