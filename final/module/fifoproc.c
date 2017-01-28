@@ -207,11 +207,11 @@ static ssize_t fifoproc_write(struct file *filp, const char __user *buf, size_t 
 static ssize_t fifoproc_read(struct file *filp, char __user *buf, size_t len, loff_t *off) {  
 	int nr_bytes = len > BUFFER_LENGTH ? BUFFER_LENGTH : len;
 	char kbuffer[BUFFER_LENGTH];	
-	int size;
+	int size = 0;
 
 	fifo_data_t *fifo_data = (fifo_data_t*)PDE_DATA(filp->f_inode);
 
-	printk(KERN_INFO "fifoproc - READ: Request to read: len[%i], nr_bytes[%i]\n", len, nr_bytes);
+	printk(KERN_INFO "fifoproc - READ: Request to read: len[%i], nr_bytes[%i], size[%i]\n", len, nr_bytes, size_cbuffer_t(fifo_data->cbuffer));
   
 	if ((*off) > 0) 
 		return 0;
@@ -227,9 +227,8 @@ static ssize_t fifoproc_read(struct file *filp, char __user *buf, size_t len, lo
 	//	cond_wait(cons, mtx);
 	//}
 	size = size_cbuffer_t(fifo_data->cbuffer);
-	while (size < nr_bytes && fifo_data->prod_count > 0) {
-		size = size_cbuffer_t(fifo_data->cbuffer);
-		printk(KERN_INFO "fifoproc - READ: Buffer not full enough (want %i, got %i)...\n", nr_bytes, size);	
+	while (size < nr_bytes) {
+		printk(KERN_INFO "fifoproc - READ: Buffer not full enough (want %i, got %i), prod(%i)...\n", nr_bytes, size, fifo_data->prod_count);	
 		fifo_data->nr_cons_waiting++;
 		up(&(fifo_data->sem_mutex));
 
@@ -240,7 +239,8 @@ static ssize_t fifoproc_read(struct file *filp, char __user *buf, size_t len, lo
 			return -EINTR;
 		}	
 
-		printk(KERN_INFO "fifoproc - READ: Checking condvar...\n");	
+		printk(KERN_INFO "fifoproc - READ: Checking condvar...\n");		
+		size = size_cbuffer_t(fifo_data->cbuffer);	
 		if (down_interruptible(&(fifo_data->sem_mutex))) {
 			return -EINTR;
 		}
@@ -291,6 +291,11 @@ int init_fifo(fifo_data_t *fifo, char * name) {
 	sema_init(&(fifo->sem_mutex), 1);
 	sema_init(&(fifo->sem_prod), 0);
 	sema_init(&(fifo->sem_cons), 0);
+
+	fifo->prod_count = 0;
+	fifo->cons_count = 0;
+	fifo->nr_prod_waiting = 0;
+	fifo->nr_cons_waiting = 0;
 
 	fifo->cbuffer = create_cbuffer_t(BUFFER_LENGTH);
 	if (fifo->cbuffer == NULL) {
