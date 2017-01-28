@@ -23,6 +23,7 @@ int recieve(char * recieve_fifo) {
 	bytes_read = read(fifo_fd, &message, chat_message_size);
 	if (bytes_read == -1) {
 		perror("read()");
+		close(fifo_fd);
 		return 1;
 	}
 
@@ -40,6 +41,7 @@ int recieve(char * recieve_fifo) {
 		bytes_read = read(fifo_fd, &message, chat_message_size);
 		if (bytes_read == -1) {
 			perror("read()");
+			close(fifo_fd);
 			return 1;
 		}
 
@@ -80,6 +82,7 @@ int send(char * username, char * send_fifo) {
 	bytes_written = write(fifo_fd, &message, chat_message_size);
 	if (bytes_written == -1) {
 		perror("write()");
+		close(fifo_fd);
 		return 1;
 	}
 
@@ -90,6 +93,7 @@ int send(char * username, char * send_fifo) {
 		bytes_written = write(fifo_fd, &message, chat_message_size);
 		if (bytes_written == -1) {
 			perror("write()");
+			close(fifo_fd);
 			return 1;
 		}		
 	}
@@ -102,6 +106,7 @@ int send(char * username, char * send_fifo) {
 	bytes_written = write(fifo_fd, &message, chat_message_size);
 	if (bytes_written == -1) {
 		perror("write()");
+		close(fifo_fd);
 		return 1;
 	}	
 
